@@ -20,7 +20,7 @@ function MM:DecorateAction(action,slot)
         action.mountID=action.id==150544 and 0 or C_MountJournal.GetMountFromSpell(action.id)
     elseif action.kind=="summonmount" and C_MountJournal then
         if action.id==0 then
-            action.name,action.icon,action.spellID="Invocar montaria favorita aleatória",413588,150544
+            action.name,action.icon,action.spellID="Summon Random Favorite Mount",413588,150544
         else
             local name,spellID,icon=C_MountJournal.GetMountInfoByID(action.id)
             action.name,action.spellID,action.icon=name,spellID,icon
@@ -38,11 +38,11 @@ function MM:ActionEntry(action)
     local copied=action.mountID~=nil and {kind="summonmount",id=action.mountID} or self:Copy(action)
     self:DecorateAction(copied)
     local role=copied.kind=="summonmount" and "mount" or "utility"
-    return {id=key,name=copied.name or ({macro="Macro da origem (recapturar)",item="Item",flyout="Menu de habilidades"})[copied.kind] or "Montaria",
+    return {id=key,name=copied.name or ({macro="Source macro (recapture)",item="Item",flyout="Spell menu"})[copied.kind] or "Mount",
         icon=copied.icon,role=role,curated=true,action=copied,spellID=copied.spellID,
         purpose={primary=role=="mount" and "travel" or "utility",cadence="utility",description=role=="mount"
-            and "Viajar / voar / ir mais rápido. Copia a escolha exata da origem; não escolhe outra montaria."
-            or "Ação utilitária da origem; copia apenas quando a mesma ação está disponível no destino."}}
+            and "Travel / fly / move faster. Copies the exact source selection; does not choose another mount."
+            or "Source utility action; copied only when the same action is available on the destination."}}
 end
 
 function MM:FindExactMacro(action)
@@ -118,7 +118,7 @@ end
 function MM:PutAction(slot,action)
     if not action then
         PickupAction(slot); ClearCursor()
-        return GetActionInfo(slot)==nil,"Não foi possível limpar a posição "..slot
+        return GetActionInfo(slot)==nil,"Could not clear slot "..slot
     end
     if action.kind=="spell" then
         if action.mountID~=nil then return self:PutAction(slot,{kind="summonmount",id=action.mountID}) end
@@ -132,27 +132,27 @@ function MM:PutAction(slot,action)
                 if C_MountJournal.GetDisplayedMountID(display)==action.id then index=display; break end
             end
         end
-        if not index then return false,"A montaria está oculta pelos filtros da coleção. Abra Montarias e limpe os filtros." end
+        if not index then return false,"The mount is hidden by collection filters. Open Mounts and clear the filters." end
         C_MountJournal.Pickup(index)
         local kind,id=GetCursorInfo()
         if kind~="mount" or id~=action.id then
-            ClearCursor(); return false,"Não foi possível pegar a montaria exata da origem."
+            ClearCursor(); return false,"Could not pick up the exact source mount."
         end
     elseif action.kind=="macro" then
         local id=self:FindExactMacro(action)
-        if not id then return false,"A macro exata não está disponível neste personagem." end
+        if not id then return false,"The exact macro is unavailable on this character." end
         PickupMacro(id)
-        if GetCursorInfo()~="macro" then ClearCursor(); return false,"Não foi possível pegar a macro." end
+        if GetCursorInfo()~="macro" then ClearCursor(); return false,"Could not pick up the macro." end
     elseif action.kind=="item" then
         if PlayerHasToy and PlayerHasToy(action.id) and C_ToyBox and C_ToyBox.PickupToyBoxItem then
             C_ToyBox.PickupToyBoxItem(action.id)
         else C_Item.PickupItem(action.id) end
         local kind,id=GetCursorInfo()
-        if kind~="item" or id~=action.id then ClearCursor(); return false,"Não foi possível pegar o item." end
-    else return false,"Tipo de ação ainda não pode ser copiado: "..tostring(action.kind) end
+        if kind~="item" or id~=action.id then ClearCursor(); return false,"Could not pick up the item." end
+    else return false,"This action type cannot be copied yet: "..tostring(action.kind) end
     PlaceAction(slot); ClearCursor()
     local kind,id=GetActionInfo(slot)
-    return self:ActionMatches(kind and {kind=kind,id=id},action),"O jogo recusou a ação na posição "..slot
+    return self:ActionMatches(kind and {kind=kind,id=id},action),"The game rejected the action in slot "..slot
 end
 
 function MM:SaveVisitedBars()

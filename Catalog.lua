@@ -1,32 +1,32 @@
 local _, MM = ...
 
 MM.classes = {
-    {id=1, token="WARRIOR", name="Guerreiro", specs={71,72,73}},
-    {id=2, token="PALADIN", name="Paladino", specs={65,66,70}},
-    {id=3, token="HUNTER", name="Caçador", specs={253,254,255}},
-    {id=4, token="ROGUE", name="Ladino", specs={259,260,261}},
-    {id=5, token="PRIEST", name="Sacerdote", specs={256,257,258}},
-    {id=6, token="DEATHKNIGHT", name="Cavaleiro da Morte", specs={250,251,252}},
-    {id=7, token="SHAMAN", name="Xamã", specs={262,263,264}},
-    {id=8, token="MAGE", name="Mago", specs={62,63,64}},
-    {id=9, token="WARLOCK", name="Bruxo", specs={265,266,267}},
-    {id=10, token="MONK", name="Monge", specs={268,269,270}},
-    {id=11, token="DRUID", name="Druida", specs={102,103,104,105}},
-    {id=12, token="DEMONHUNTER", name="Caçador de Demônios", specs={577,581,1480}},
-    {id=13, token="EVOKER", name="Evocador", specs={1467,1468,1473}},
+    {id=1, token="WARRIOR", name="Warrior", specs={71,72,73}},
+    {id=2, token="PALADIN", name="Paladin", specs={65,66,70}},
+    {id=3, token="HUNTER", name="Hunter", specs={253,254,255}},
+    {id=4, token="ROGUE", name="Rogue", specs={259,260,261}},
+    {id=5, token="PRIEST", name="Priest", specs={256,257,258}},
+    {id=6, token="DEATHKNIGHT", name="Death Knight", specs={250,251,252}},
+    {id=7, token="SHAMAN", name="Shaman", specs={262,263,264}},
+    {id=8, token="MAGE", name="Mage", specs={62,63,64}},
+    {id=9, token="WARLOCK", name="Warlock", specs={265,266,267}},
+    {id=10, token="MONK", name="Monk", specs={268,269,270}},
+    {id=11, token="DRUID", name="Druid", specs={102,103,104,105}},
+    {id=12, token="DEMONHUNTER", name="Demon Hunter", specs={577,581,1480}},
+    {id=13, token="EVOKER", name="Evoker", specs={1467,1468,1473}},
 }
 MM.roles = {
-    unknown="Sem classificação", damage="Dano (estimado)", support="Suporte (estimado)",
-    builder="Gerador de recurso", spender="Gasto de recurso", core="Ataque principal",
-    filler="Ataque de preenchimento", proc_builder="Preparação de proc", proc_spender="Consumo de proc",
-    aoe_proc_spender="Consumo de proc em área", empowered="Ataque potencializado", assisted="Assistente de botão único",
-    aoe_builder="Gerador em área", aoe_spender="Gasto em área", aoe="Dano em área",
-    burst="Cooldown ofensivo", execute="Execução", dot="Dano periódico",
-    interrupt="Interrupção", stun="Controle / atordoamento", defensive="Defesa",
-    immunity="Imunidade", mitigation="Gasto defensivo", mobility="Mobilidade", pull="Puxar inimigo", heal="Cura",
-    cleanse="Dissipação", resurrect="Ressurreição", buff="Buff", taunt="Provocação",
-    slow="Reduzir velocidade", cc_break="Resistir a controle",
-    mount="Montaria · viajar / voar", utility="Utilitário", water_walk="Caminhar sobre a água",
+    unknown="Unclassified", damage="Damage (estimated)", support="Support (estimated)",
+    builder="Resource generator", spender="Resource spender", core="Core attack",
+    filler="Filler attack", proc_builder="Proc setup", proc_spender="Proc spender",
+    aoe_proc_spender="Area proc spender", empowered="Empowered attack", assisted="Single-Button Assistant",
+    aoe_builder="Area generator", aoe_spender="Area spender", aoe="Area damage",
+    burst="Offensive cooldown", execute="Execute", dot="Damage over time",
+    interrupt="Interrupt", stun="Control / stun", defensive="Defense",
+    immunity="Immunity", mitigation="Defensive spender", mobility="Mobility", pull="Enemy pull", heal="Healing",
+    cleanse="Dispel", resurrect="Resurrection", buff="Buff", taunt="Taunt",
+    slow="Slow", cc_break="Control break",
+    mount="Mount · travel / fly", utility="Utility", water_walk="Water walking",
 }
 -- Seeds describe intent, not current damage/cost/tuning. Live spellbook determines availability.
 -- Spec constraints keep distinct rotations separate. Unknown spells remain manual/estimated.
@@ -262,11 +262,11 @@ add("EVOKER", "buff", {395152,409311}, {1473})
 
 -- Functional profiles use effect scope, NOT the spell's own damage school.
 -- No tuning numbers are hardcoded. Multiple effects remain distinct capabilities.
-MM.schools = {physical="física", magic="mágica", all="geral"}
-MM.mechanisms = {reduction="redução", absorb="absorção", avoidance="esquiva / aparo",
-    armor="armadura", immunity="imunidade", reflect="reflexão", resistance="resistência",
-    health="vida e cura recebida", recovery="recuperação de vida", cheat_death="evitar morte",delay="adiamento de dano"}
-MM.recipients = {self="pessoal", friendly="alvo aliado", group="grupo"}
+MM.schools = {physical="physical", magic="magical", all="all"}
+MM.mechanisms = {reduction="reduction", absorb="absorption", avoidance="avoidance / parry",
+    armor="armor", immunity="immunity", reflect="reflection", resistance="resistance",
+    health="health and healing received", recovery="health recovery", cheat_death="cheat death",delay="damage delay"}
+MM.recipients = {self="self", friendly="friendly target", group="group"}
 local function protection(school, mechanism, recipient, cadence, coverage)
     return {school=school,mechanism=mechanism,recipient=recipient or "self",
         cadence=cadence or "cooldown",coverage=coverage or "damage"}
@@ -334,20 +334,20 @@ function MM:RoleLabel(spell)
     if purposeLabel then return purposeLabel end
     local defense=spell.defenses and spell.defenses[1]
     if defense then
-        local prefix=defense.mechanism == "immunity" and "Imunidade " or "Defesa "
-        local result=prefix..(self.schools[defense.school] or "não classificada")
+        local prefix=defense.mechanism == "immunity" and "Immunity " or "Defense "
+        local result=prefix..(self.schools[defense.school] or "unclassified")
         if defense.mechanism ~= "immunity" then result=result.." · "..(self.mechanisms[defense.mechanism] or defense.mechanism) end
-        if defense.recipient == "friendly" then result=result.." · aliado" end
+        if defense.recipient == "friendly" then result=result.." · ally" end
         return result
     end
     local result=self.roles[spell.role] or self.roles.unknown
     local traits=spell.traits or {}
-    local detail=({stun="atordoar",fear="medo",root="enraizar",incapacitate="incapacitar",disorient="desorientar",silence="silenciar",knockback="empurrar",knockup="lançar ao ar"})[traits.control]
-        or ({self="pessoal",friendly="aliado"})[traits.recipient]
-        or ({gap_closer="aproximação",displacement="deslocamento",teleport="teleporte",speed="velocidade"})[traits.movement]
+    local detail=({stun="stun",fear="fear",root="root",incapacitate="incapacitate",disorient="disorient",silence="silence",knockback="knockback",knockup="knock up"})[traits.control]
+        or ({self="self",friendly="ally"})[traits.recipient]
+        or ({gap_closer="gap closer",displacement="displacement",teleport="teleport",speed="speed"})[traits.movement]
     if not detail and spell.rotation then
-        detail=({core="recorrente",filler="preenchimento",reactive="reativo",maintenance="manutenção",
-            short_cooldown="cooldown curto",major="janela ofensiva",execute="execução"})[spell.rotation.rhythm]
+        detail=({core="repeatable",filler="filler",reactive="reactive",maintenance="maintenance",
+            short_cooldown="short cooldown",major="offensive window",execute="execute"})[spell.rotation.rhythm]
     end
     return result..(detail and " · "..detail or "")
 end
@@ -360,19 +360,19 @@ function MM:FunctionDetails(spell)
             (self.recipients[defense.recipient] or defense.recipient)
     end
     local traits=spell.traits or {}
-    if traits.no_attack then details[#details+1]="Impede atacar enquanto está ativo." end
-    if traits.prevents_magic_effects then details[#details+1]="Também previne a aplicação de efeitos mágicos." end
-    if traits.dispel_magic then details[#details+1]="Também remove ou devolve efeitos mágicos." end
+    if traits.no_attack then details[#details+1]="Prevents attacking while active." end
+    if traits.prevents_magic_effects then details[#details+1]="Also prevents magical effects from being applied." end
+    if traits.dispel_magic then details[#details+1]="Also removes or reflects magical effects." end
     if spell.rotation then
-        details[#details+1]="Na rotação: "..spell.rotation.description
+        details[#details+1]="In rotation: "..spell.rotation.description
         local source=self.rotationSources[spell.rotation.source]
         if source then
-            details[#details+1]="Fonte: "..source.publisher.." · patch "..source.patch.." · consulta "..source.checked
+            details[#details+1]="Source: "..source.publisher.." · patch "..source.patch.." · checked "..source.checked
             details[#details+1]=source.url
         end
     end
-    if spell.assistedRotation then details[#details+1]="Incluída na rotação assistida deste perfil; não indica prioridade." end
-    if spell.isAssistant then details[#details+1]="Botão nativo de assistência de dano; não é uma habilidade individual nem uma rotação de cura." end
+    if spell.assistedRotation then details[#details+1]="Included in this profile’s assisted rotation; does not indicate priority." end
+    if spell.isAssistant then details[#details+1]="Native damage-assist button; not an individual ability or a healing rotation." end
     return details
 end
 

@@ -55,13 +55,13 @@ local effectAliases={resource_generator="generate_resource",generation="generate
     proc_generation="prepare_proc",proc_consumer="consume_proc",proc_spender="consume_proc",
     proc_spend="consume_proc",aoe_damage="area_damage",damage_area="area_damage",
     immune_control="control_immunity",remove_harmful_effects="debuff_removal"}
-local effectLabels={generate_resource="geração de recurso",spend_resource="gasto de recurso",
-    prepare_proc="preparação de proc",consume_proc="consumo de proc",self_heal="cura pessoal",
-    area_damage="dano em área",control_immunity="imunidade a controle",debuff_removal="remoção de efeitos",
-    slow="lentidão",stun="atordoamento",disorient="desorientação",fear="medo",root="imobilização",
-    window_synergy="interação com a janela ofensiva",reflect="reflexão",absorb="absorção"}
-local controlLabels={stun="atordoamento",disorient="desorientação",incapacitate="incapacitação",
-    fear="medo",root="imobilização",silence="silêncio",knockback="empurrão",knockup="lançar ao ar"}
+local effectLabels={generate_resource="resource generation",spend_resource="resource spending",
+    prepare_proc="proc setup",consume_proc="proc consumption",self_heal="self-healing",
+    area_damage="area damage",control_immunity="control immunity",debuff_removal="effect removal",
+    slow="slow",stun="stun",disorient="disorient",fear="fear",root="root",
+    window_synergy="offensive-window interaction",reflect="reflection",absorb="absorb"}
+local controlLabels={stun="stun",disorient="disorient",incapacitate="incapacitate",
+    fear="fear",root="root",silence="silence",knockback="knockback",knockup="knock up"}
 
 function MM:GetFunctionProfile(spell)
     if spell.functions then return spell.functions end
@@ -109,18 +109,18 @@ function MM:GetFunctionProfile(spell)
 end
 
 local function normalizedName(name)
-    if type(name)~="string" or name=="" or name:match("^Habilidade #") then return end
+    if type(name)~="string" or name=="" or name:match("^Ability #") then return end
     return name:lower():gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 end
 
 function MM:SameAbility(source,target,sourceClass,targetClass)
-    if source.id and source.id==target.id then return "Mesma habilidade disponível no destino",3 end
+    if source.id and source.id==target.id then return "Same ability available on the destination",3 end
     local a,b=source.baseID,target.baseID
-    if a and (a==target.id or a==b) or b and b==source.id then return "Mesma habilidade; ID base ou substituição de talento",2 end
+    if a and (a==target.id or a==b) or b and b==source.id then return "Same ability; base ID or talent replacement",2 end
     local classA,classB=sourceClass or source.class,targetClass or target.class
     if classA and classA==classB then
         local nameA,nameB=normalizedName(source.name),normalizedName(target.name)
-        if nameA and nameA==nameB then return "Mesma classe e mesmo nome; copiar a habilidade disponível",1 end
+        if nameA and nameA==nameB then return "Same class and name; copy the available ability",1 end
     end
 end
 
@@ -147,51 +147,51 @@ function MM:CompareEffects(source,target)
         approximate=true
         if a.primary~=b.primary then
             penalty=4
-            notes[#notes+1]="Mesmo uso de emergência; cura e proteção têm efeitos diferentes e imunidade não recupera vida"
+            notes[#notes+1]="Same emergency use; healing and protection have different effects, and immunity does not restore health"
         end
     else
         if a.damage=="primary" and b.damage==nil and target.role=="burst"
             or b.damage=="primary" and a.damage==nil and source.role=="burst" then
-            return false,"Dano direto não confirmado no outro cooldown; não assumir que um buff cause dano em área"
+            return false,"Direct damage is not confirmed on the other cooldown; do not assume a buff deals area damage"
         end
         if a.damage=="primary" and b.damage=="none" or a.damage=="none" and b.damage=="primary" then
-            return false,"Dano direto principal e botão sem dano têm papéis diferentes na rotação"
+            return false,"Primary direct damage and a no-damage button play different roles in the rotation"
         end
         if a.damage=="primary" and b.damage=="primary" and a.area~=b.area then
-            return false,"Dano em área e dano de alvo único têm finalidades diferentes"
+            return false,"Area damage and single-target damage serve different purposes"
         end
         if context.damageWindow and a.primary~=b.primary then
             approximate=true; penalty=penalty+3
-            notes[#notes+1]="Dano em área com recarga; janela ofensiva e interações da rotação diferentes"
+            notes[#notes+1]="Area damage on cooldown; offensive window and rotation interactions differ"
         end
         if a.primary==b.primary and (a.primary=="control" or a.primary=="interrupt") then
-            if a.controlScope~=b.controlScope then return false,"Controle coletivo não equivale a controle de um único alvo" end
+            if a.controlScope~=b.controlScope then return false,"Group control is not equivalent to single-target control" end
             context.collective=a.controlScope=="area"
             if a.control~=b.control then
-                if a.primary=="control" and not context.collective then return false,"Tipos de controle de alvo único diferentes" end
+                if a.primary=="control" and not context.collective then return false,"Different types of single-target control" end
                 approximate=true; penalty=penalty+2
-                notes[#notes+1]="Efeitos de controle diferentes: "..(controlLabels[a.control] or "interrupção").." > "..(controlLabels[b.control] or "interrupção")
+                notes[#notes+1]="Different control effects: "..(controlLabels[a.control] or "interrupt").." > "..(controlLabels[b.control] or "interrupt")
             end
         end
         if a.damage~=b.damage and a.damage and b.damage then
             approximate=true; penalty=penalty+2
-            notes[#notes+1]="A presença de dano secundário muda"
+            notes[#notes+1]="Secondary damage presence differs"
         end
     end
     for effect in pairs(a.secondary) do
         if b.secondary[effect] then context.bonus=math.min(6,context.bonus+2)
         else
             approximate=true; penalty=penalty+2
-            notes[#notes+1]="Função secundária não confirmada na alternativa: "..effectLabels[effect]
+            notes[#notes+1]="Secondary effect not confirmed on the alternative: "..effectLabels[effect]
         end
     end
     if a.breakOnDamage~=b.breakOnDamage and (a.breakOnDamage~=nil or b.breakOnDamage~=nil) then
-        approximate=true; penalty=penalty+2; notes[#notes+1]="Dano pode interromper o controle de forma diferente"
+        approximate=true; penalty=penalty+2; notes[#notes+1]="Damage breaks crowd control differently"
     end
     local x,y=source.rotation,target.rotation
     if x and y and (x.rhythm~=y.rhythm or x.flow~=y.flow) then
         approximate=true
-        notes[#notes+1]="Ritmo ou interação com recurso/proc na rotação diferentes"
+        notes[#notes+1]="Different rotation cadence or resource/proc interaction"
     end
     return true,table.concat(notes,"; "),approximate,math.min(penalty,12),context
 end
@@ -271,59 +271,59 @@ function MM:CompareUsage(source,target)
         local sharedHeal=isHeal(a) and isHeal(b)
         local sharedBreak=controlBreak(a) and controlBreak(b)
         if a.primary~=b.primary and not context.emergency and not context.damageWindow and not approach and not sharedHeal and not sharedBreak then
-            return false,"Finalidades principais diferentes"
+            return false,"Different primary purposes"
         end
-        if not context.emergency and isHeal(a)~=isHeal(b) then return false,"Finalidade principal diferente: cura e outra função" end
+        if not context.emergency and isHeal(a)~=isHeal(b) then return false,"Different primary purpose: healing versus another function" end
         if isHeal(a) and not context.emergency then
             local scopeA=a.scope or (a.primary=="self_heal" and "self" or "friendly")
             local scopeB=b.scope or (b.primary=="self_heal" and "self" or "friendly")
-            if scopeA~=scopeB then return false,"Cura pessoal, aliada e de grupo têm finalidades diferentes" end
+            if scopeA~=scopeB then return false,"Self, ally, and group healing serve different purposes" end
             if a.condition~=b.condition and (a.condition=="after_kill" or b.condition=="after_kill") then
-                return false,"Cura que exige abate não substitui cura disponível sob demanda"
+                return false,"A heal that requires a kill does not replace an on-demand heal"
             end
         end
         if controlBreak(a) or controlBreak(b) then
-            if not controlBreak(a) or not controlBreak(b) then return false,"Sair de controle é a finalidade principal" end
+            if not controlBreak(a) or not controlBreak(b) then return false,"Breaking crowd control is the primary purpose" end
             local required=breaksFor[a.primary]
             if required then
                 if not (b.breaks and b.breaks[required]) then
-                    return false,"A alternativa não remove "..({stun="atordoamento",fear="medo"})[required]
+                    return false,"The alternative does not remove "..({stun="stun",fear="fear"})[required]
                 end
             else
                 local shared=false
                 for kind in pairs(a.breaks or {}) do if b.breaks and b.breaks[kind] then shared=true end end
-                if not shared then return false,"As habilidades removem controles diferentes" end
+                if not shared then return false,"The abilities remove different control effects" end
             end
             for kind in pairs(a.breaks or {}) do
-                if not (b.breaks and b.breaks[kind]) then approximate=true; notes[#notes+1]="Não remove todos os mesmos controles"; break end
+                if not (b.breaks and b.breaks[kind]) then approximate=true; notes[#notes+1]="Does not remove all the same control effects"; break end
             end
         end
-        if not context.emergency and (a.primary=="immunity")~=(b.primary=="immunity") then return false,"Imunidade e redução de dano têm finalidades diferentes" end
-        if not context.emergency and a.scope and b.scope and a.scope~=b.scope then return false,"Alvos principais diferentes" end
+        if not context.emergency and (a.primary=="immunity")~=(b.primary=="immunity") then return false,"Immunity and damage reduction serve different purposes" end
+        if not context.emergency and a.scope and b.scope and a.scope~=b.scope then return false,"Different primary targets" end
     end
     if source.role=="heal" or target.role=="heal" or isHeal(a) or isHeal(b) then
         local recurringA,recurringB=isRepeatable(source),isRepeatable(target)
         if recurringA~=nil and recurringB~=nil and recurringA~=recurringB then
-            return false,"Cura repetível por recurso não equivale a cura com cooldown ou condição de abate"
+            return false,"Repeatable resource-based healing is not equivalent to cooldown healing or healing that requires a kill"
         end
     end
     if a and b and a.condition~=b.condition and (a.condition or b.condition) then
         approximate=true; penalty=penalty+4
-        notes[#notes+1]="Condições de uso diferentes; confira a disponibilidade"
+        notes[#notes+1]="Different usage conditions; check availability"
     end
     local x,y=self:UsageCooldown(source),self:UsageCooldown(target)
     if x and y and x>1.5 and y>1.5 then
         local ratio=math.max(x,y)/math.min(x,y)
         if ratio>=1.5 then
             approximate=true; penalty=penalty+math.min(6,math.floor(math.log(ratio)/math.log(2)*3))
-            notes[#notes+1]="Cooldowns de referência: "..seconds(x).." > "..seconds(y)
+            notes[#notes+1]="Reference cooldowns: "..seconds(x).." > "..seconds(y)
         end
     end
     local chargesA=source.chargeCount or a and a.charges or 1
     local chargesB=target.chargeCount or b and b.charges or 1
     if chargesA~=chargesB then
         approximate=true; penalty=penalty+2
-        notes[#notes+1]="Quantidade de cargas diferente"
+        notes[#notes+1]="Different number of charges"
     end
     return true,table.concat(notes,"; "),approximate,penalty,context
 end
@@ -333,27 +333,27 @@ function MM:PurposeLabel(spell)
     if not purpose then return end
     local functions=self:GetFunctionProfile(spell)
     if functions.emergency then
-        return "Emergência · "..(purpose.primary=="immunity" and "imunidade" or "cura")
+        return "Emergency · "..(purpose.primary=="immunity" and "immunity" or "healing")
     end
     if purpose.primary=="control" and functions.controlScope=="area" then
-        return "Controle coletivo · "..(controlLabels[functions.control] or "área")
+        return "Group control · "..(controlLabels[functions.control] or "area")
     end
-    if purpose.primary=="interrupt" and functions.controlScope=="area" then return "Interrupção · coletiva" end
-    if functions.damage=="primary" and functions.area and spell.role=="burst" then return "Dano em área · explosão" end
-    local labels={stun_break="Sair de atordoamento",fear_break="Sair de medo",control_break="Sair de controle"}
+    if purpose.primary=="interrupt" and functions.controlScope=="area" then return "Group interrupt" end
+    if functions.damage=="primary" and functions.area and spell.role=="burst" then return "Area damage · burst" end
+    local labels={stun_break="Break stun",fear_break="Break fear",control_break="Break crowd control"}
     local label=labels[purpose.primary]
     if isHeal(purpose) then
-        label=({self="Cura pessoal",friendly="Cura de aliado",group="Cura de grupo"})[purpose.scope or (purpose.primary=="self_heal" and "self" or "friendly")]
-        if purpose.condition=="after_kill" then return label.." · após abate" end
-        if isRepeatable(spell) then return label.." · repetível" end
-        return label.." · com cooldown"
+        label=({self="Personal healing",friendly="Ally healing",group="Group healing"})[purpose.scope or (purpose.primary=="self_heal" and "self" or "friendly")]
+        if purpose.condition=="after_kill" then return label.." · after a kill" end
+        if isRepeatable(spell) then return label.." · repeatable" end
+        return label.." · with a cooldown"
     end
     if label then return label end
-    local utilityLabels={threat_drop="Reduzir ameaça",interrupt="Interrupção",taunt="Provocação",
-        resurrect="Ressurreição",resurrection="Ressurreição",water_walk="Caminhar sobre a água",
-        travel="Montaria · viajar / voar",utility="Utilitário",buff="Buff de grupo"}
+    local utilityLabels={threat_drop="Threat reduction",interrupt="Interrupt",taunt="Taunt",
+        resurrect="Resurrection",resurrection="Resurrection",water_walk="Water walking",
+        travel="Mount · travel / fly",utility="Utility",buff="Group buff"}
     if purpose.primary=="cleanse" then
-        return purpose.scope=="enemy" and "Remover efeito do inimigo" or "Dissipação de aliado"
+        return purpose.scope=="enemy" and "Remove an enemy effect" or "Dispel an ally effect"
     end
     return utilityLabels[purpose.primary]
 end
@@ -361,33 +361,33 @@ end
 function MM:UsageDetails(spell)
     local purpose=spell.purpose
     local details={}
-    if purpose and purpose.description then details[#details+1]="Finalidade principal: "..purpose.description end
+    if purpose and purpose.description then details[#details+1]="Primary purpose: "..purpose.description end
     local functions=self:GetFunctionProfile(spell)
     local secondary={}
     for effect in pairs(functions.secondary) do secondary[#secondary+1]=effectLabels[effect] end
     table.sort(secondary)
-    if #secondary>0 then details[#details+1]="Funções secundárias: "..table.concat(secondary,", ") end
+    if #secondary>0 then details[#details+1]="Secondary effects: "..table.concat(secondary,", ") end
     if functions.controlScope then
-        details[#details+1]="Controle: "..(controlLabels[functions.control] or "controle").." · "..
-            (functions.controlScope=="area" and "coletivo" or "alvo único")
+        details[#details+1]="Control: "..(controlLabels[functions.control] or "control").." · "..
+            (functions.controlScope=="area" and "group" or "single target")
     end
-    if functions.damage=="none" then details[#details+1]="Sem dano direto." end
-    if functions.emergency then details[#details+1]="Reserva de sobrevivência; mecanismo e consequências próprias. Imunidade não implica cura." end
+    if functions.damage=="none" then details[#details+1]="No direct damage." end
+    if functions.emergency then details[#details+1]="Emergency-survival option; each has its own mechanism and consequences. Immunity does not imply healing." end
     local cooldown,source=self:UsageCooldown(spell)
     if cooldown then
-        details[#details+1]=cooldown>1.5 and (seconds(cooldown).." · "..source.."; talentos podem modificar.")
-            or "Sem cooldown próprio longo; recursos e condições de uso continuam necessários."
+        details[#details+1]=cooldown>1.5 and (seconds(cooldown).." · "..source.."; talents may change it.")
+            or "No long cooldown of its own; resource and usage conditions still apply."
     end
     local charges=spell.chargeCount or purpose and purpose.charges
-    if charges and charges>1 then details[#details+1]="Cargas: "..charges end
+    if charges and charges>1 then details[#details+1]="Charges: "..charges end
     if purpose then
-        if purpose.condition=="after_kill" then details[#details+1]="Disponível apenas após um abate válido; a janela de uso não é um cooldown." end
-        if purpose.recovery=="kill_reset" then details[#details+1]="Um abate válido reinicia o cooldown; sem abate, a recarga continua necessária." end
-        if purpose.resetCondition then details[#details+1]="Recarga: "..purpose.resetCondition end
+        if purpose.condition=="after_kill" then details[#details+1]="Available only after a valid kill; the usage window is not a cooldown." end
+        if purpose.recovery=="kill_reset" then details[#details+1]="A valid kill resets the cooldown; without a kill, the cooldown still applies." end
+        if purpose.resetCondition then details[#details+1]="Cooldown: "..purpose.resetCondition end
         if purpose.chargeNote then details[#details+1]=purpose.chargeNote end
         if purpose.intentNote then details[#details+1]=purpose.intentNote end
-        if purpose.condition and purpose.condition~="after_kill" then details[#details+1]="Condição de uso: "..purpose.condition end
-        if purpose.reviewed==false then details[#details+1]="Perfil incompleto ou legado; não usar como equivalência automática." end
+        if purpose.condition and purpose.condition~="after_kill" then details[#details+1]="Usage condition: "..purpose.condition end
+        if purpose.reviewed==false then details[#details+1]="Incomplete or legacy profile; do not use for automatic mapping." end
         for _,url in ipairs(purpose.sources or {}) do details[#details+1]=url end
     end
     return details

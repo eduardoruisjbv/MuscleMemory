@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: MuscleMemory
-## Notes: Mantém as funções das habilidades nos mesmos lugares entre personagens.
+## Notes: Keep abilities in the same action-bar slots across characters.
 ## Author: Eduardo Rui
 ## Version: 0.7.0
 ## SavedVariables: MuscleMemoryDB

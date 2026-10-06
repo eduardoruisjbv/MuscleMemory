@@ -13,27 +13,27 @@ amend(207167,{class="DEATHKNIGHT",name="Blinding Sleet",role="stun",primary="con
     cadence="utility",recovery="cooldown",cooldown=60,scope="enemy",damage="none",
     control={kind="disorient",scope="area",breakOnDamage=true},traits={control="disorient"},
     also={"area","disorient","slow"},reviewed=true,checkedAt="2026-10-04",patch="12.1",
-    description="Parar vários inimigos em um cone, sem causar dano; dano pode quebrar a desorientação. Depois aplica lentidão.",
+    description="Stop multiple enemies in a cone without dealing damage; damage can break the disorient. Applies a slow afterward.",
     sources={"https://www.wowhead.com/spell=207167/blinding-sleet"}})
 amend(279302,{class="DEATHKNIGHT",name="Frostwyrm's Fury",specs={251},role="burst",
     primary="offensive_window",cadence="window",recovery="cooldown",cooldown=90,scope="enemy",
     damage="primary",area=true,control={kind="stun",scope="area"},
     also={"area_damage","stun","slow","window_synergy"},reviewed=true,checkedAt="2026-10-04",patch="12.1",
-    description="Explosão de dano em área na janela ofensiva; também atordoa e desacelera os inimigos atingidos. Talentos Apex acrescentam interações com Pillar of Frost e recast.",
+    description="Area-damage burst during an offensive window; also stuns and slows enemies hit. Apex talents add interactions with Pillar of Frost and recasts.",
     sources={"https://www.wowhead.com/spell=279302/frostwyrms-fury",
         "https://www.icy-veins.com/wow/frost-death-knight-pve-dps-rotation-cooldowns-abilities"}})
 amend(5246,{class="WARRIOR",name="Intimidating Shout",role="stun",primary="control",
     cadence="utility",recovery="cooldown",cooldown=90,scope="enemy",damage="none",
     control={kind="fear",scope="area",breakOnDamage=true},traits={control="fear"},
     also={"area","fear","slow"},reviewed=true,checkedAt="2026-10-04",patch="12.1",
-    description="Controlar o alvo e inimigos próximos por medo, sem dano direto; pode fazer inimigos fugirem e dano pode quebrar o efeito.",
+    description="Control the target and nearby enemies with fear, without direct damage; enemies may flee, and damage can break the effect.",
     sources={"https://www.wowhead.com/spell=5246/intimidating-shout"}})
 amend(227847,{class="WARRIOR",name="Bladestorm",specs={71,72},role="burst",
     primary="offensive_window",cadence="window",recovery="cooldown",cooldown=90,scope="enemy",
     damage="primary",area=true,also={"area_damage","control_immunity","generate_resource"},
     variants={[71]={also={"area_damage","control_immunity"}}},
     reviewed=true,checkedAt="2026-10-04",patch="12.1",
-    description="Grande dano em área durante uma janela ofensiva; imunidade a controle é proteção do próprio guerreiro, não stun nos inimigos.",
+    description="Heavy area damage during an offensive window; control immunity protects the warrior and does not stun enemies.",
     sources={"https://www.wowhead.com/spell=227847/bladestorm"}})
 
 -- Shared emergency decision, with deliberately different mechanisms. No claim

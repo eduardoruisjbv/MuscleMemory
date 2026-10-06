@@ -30,7 +30,7 @@ function MM:Identity()
     local index = (specAPI and specAPI.GetSpecialization or GetSpecialization)()
     local spec, name
     if index then spec, name = self:SpecInfo(index) end
-    return UnitGUID("player"), class, classID, spec or 0, name or "Sem especialização"
+    return UnitGUID("player"), class, classID, spec or 0, name or "No specialization"
 end
 
 function MM:ProfileKey()
@@ -68,7 +68,7 @@ end
 function MM:SpellInfo(id)
     local info = C_Spell.GetSpellInfo(id)
     if not info then C_Spell.RequestLoadSpellData(id) end
-    return info or {name="Habilidade #"..id, iconID=134400}
+    return info or {name="Ability #"..id, iconID=134400}
 end
 
 function MM:ReadActions()
@@ -139,18 +139,18 @@ end
 function MM:GetBindingForSlot(slot,reference)
     local keys
     if reference then
-        if not reference.bindings then return "Atalho não capturado",{} end
+        if not reference.bindings then return "Keybinding not captured",{} end
         keys=reference.bindings[slot] or {}
     else
         local settings=self:Settings()
         if settings.targetClass~=self.current.class or settings.targetSpec~=self.current.spec then
-            return "Entre no destino",{}
+            return "Log in to the destination",{}
         end
         keys=(self.bindingSnapshot or self:ReadBindings())[slot] or {}
     end
     local labels={}
     for _,key in ipairs(keys) do labels[#labels+1]=GetBindingText and GetBindingText(key,1) or key end
-    return #labels>0 and table.concat(labels," / ") or "Sem atalho",keys
+    return #labels>0 and table.concat(labels," / ") or "No keybinding",keys
 end
 
 function MM:Scan()
@@ -194,7 +194,7 @@ function MM:Scan()
                     end
                     if C_MountJournal and C_MountJournal.GetMountFromSpell and C_MountJournal.GetMountFromSpell(id) then
                         entry.role="mount"
-                        entry.purpose={primary="travel",cadence="utility",description="Viajar / voar / ir mais rápido com a montaria escolhida."}
+                        entry.purpose={primary="travel",cadence="utility",description="Travel / fly / move faster using the selected mount."}
                     end
                     spells[id] = entry
                 end
@@ -227,12 +227,12 @@ function MM:Scan()
 end
 
 function MM:Capture()
-    if InCombatLockdown() then return self:Print("Saia do combate para capturar as barras.") end
+    if InCombatLockdown() then return self:Print("Leave combat to capture action bars.") end
     if self:Settings().auto then
-        return self:Print("Desative a aplicação automática antes de capturar uma nova referência.")
+        return self:Print("Disable automatic application before capturing a new reference.")
     end
     self:Scan()
-    if not next(self.current.spells) then return self:Print("O grimório ainda não carregou. Tente novamente.") end
+    if not next(self.current.spells) then return self:Print("The spellbook has not loaded yet. Try again.") end
     local reference = self:Copy(self.current)
     reference.actions = self:ReadActions()
     reference.bindings = self:Copy(self:ReadBindings())
@@ -242,12 +242,12 @@ function MM:Capture()
     self:InvalidateContext()
     self:Settings().sourceKey = reference.key
     self:RefreshUI()
-    self:Print("Referência salva: "..reference.name.." / "..reference.specName..".")
+    self:Print("Reference saved: "..reference.name.." / "..reference.specName..".")
 end
 
 function MM:TargetSpells(class, spec)
     if self.current and class == self.current.class and spec == self.current.spec then
-        return self.current.spells, "Grimório atual"
+        return self.current.spells, "Current spellbook"
     end
     local result = {}
     for id,catalog in pairs(self.catalog) do
@@ -271,7 +271,7 @@ function MM:TargetSpells(class, spec)
             observed=true
         end
     end
-    return result, observed and "Catálogo + personagens visitados" or "Catálogo base; talentos não verificados"
+    return result, observed and "Catalog + visited characters" or "Base catalog; talents not verified"
 end
 
 function MM:Context()
@@ -316,11 +316,11 @@ function MM:Context()
 end
 
 function MM:SetMapping(sourceID, targetID)
-    if InCombatLockdown() then return self:Print("Saia do combate para editar equivalências.") end
+    if InCombatLockdown() then return self:Print("Leave combat to edit mappings.") end
     local reference, targets, overrides = self:Context()
     if not reference or not reference.spells[sourceID] then return end
-    if self:IsLevelingMode() then return self:Print("No leveling, use o botão direito para ajustar prioridade ou fixar a posição.") end
-    if targetID and not targets[targetID] then return self:Print("Essa habilidade não pertence ao destino selecionado.") end
+    if self:IsLevelingMode() then return self:Print("In leveling mode, right-click to adjust priority or pin the position.") end
+    if targetID and not targets[targetID] then return self:Print("This ability does not belong to the selected destination.") end
     overrides[sourceID] = targetID -- nil restores automatic matching, false explicitly excludes.
     self:InvalidateContext()
     self:RefreshUI()
@@ -328,7 +328,7 @@ function MM:SetMapping(sourceID, targetID)
 end
 
 function MM:UseAutomaticSuggestions()
-    if InCombatLockdown() then return self:Print("Saia do combate para recuperar as sugestões.") end
+    if InCombatLockdown() then return self:Print("Leave combat to restore suggestions.") end
     local reference,_,overrides=self:Context()
     if not reference then return end
     for id in pairs(overrides) do overrides[id]=nil end
@@ -338,26 +338,26 @@ end
 
 function MM:GetApplyState()
     local empty={plan={},skipped=0,changed=0}
-    if InCombatLockdown() then return false,"Saia do combate para pré-visualizar e aplicar alterações.",empty end
-    if GetCursorInfo() then return false,"Solte a habilidade ou item no cursor antes de aplicar.",empty end
+    if InCombatLockdown() then return false,"Leave combat to preview and apply changes.",empty end
+    if GetCursorInfo() then return false,"Drop the ability or item on your cursor before applying.",empty end
     if UnitInVehicle("player") or (HasOverrideActionBar and HasOverrideActionBar())
         or (HasVehicleActionBar and HasVehicleActionBar()) or (HasPossessBar and HasPossessBar()) then
-        return false,"Saia do veículo ou da barra temporária.",empty
+        return false,"Leave the vehicle or temporary action bar.",empty
     end
     local settings=self:Settings()
     if settings.targetClass~=self.current.class or settings.targetSpec~=self.current.spec then
-        return false,"Entre no personagem e na especialização de destino.",empty
+        return false,"Log in to the destination character and specialization.",empty
     end
     local reference,_,_,matches=self:Context()
-    if not reference then return false,"Capture e selecione as barras do seu main.",empty end
-    if reference.key==self.current.key and not self:IsLevelingMode() then return false,"Selecione uma referência de outro personagem ou especialização.",empty end
+    if not reference then return false,"Capture and select your main’s action bars.",empty end
+    if reference.key==self.current.key and not self:IsLevelingMode() then return false,"Select a reference from another character or specialization.",empty end
     local _,targets=self:Context()
     local plan,skipped=self:BuildCurrentPlan(reference,matches,targets,self:ReadActions())
     local differences=self:DescribePlanBindings(reference,plan)
     local preview={plan=plan,skipped=skipped,changed=#plan,bindingMismatches=differences}
-    if #plan==0 then return false,"Nenhuma alteração disponível; revise as pendências.",preview end
-    local reason=#plan.." posições receberão alterações fora de combate."
-    if differences>0 then reason=reason.." "..differences.." atalhos diferem do main; confira a prévia." end
+    if #plan==0 then return false,"No changes available; review pending items.",preview end
+    local reason=#plan.." positions will change out of combat."
+    if differences>0 then reason=reason.." "..differences.." keybindings differ from the main; review the preview." end
     return true,reason,preview
 end
 
@@ -372,7 +372,7 @@ function MM:DescribePlanBindings(reference,plan)
             for _,targetKey in ipairs(targetKeys) do if sourceKey==targetKey then shared=true end end
         end
         if #sourceKeys>0 and not shared then
-            change.bindingWarning="Atalho do main: "..sourceLabel.."; no destino: "..targetLabel..". As teclas não serão alteradas."
+            change.bindingWarning="Main keybinding: "..sourceLabel.."; destination: "..targetLabel..". Keybindings will not be changed."
             differences=differences+1
         end
     end
@@ -386,14 +386,14 @@ function MM:GetPreview()
 end
 
 function MM:GetUndoState()
-    if InCombatLockdown() then return false,"Saia do combate para restaurar as barras." end
-    if GetCursorInfo() then return false,"Solte o que está no cursor antes de restaurar." end
+    if InCombatLockdown() then return false,"Leave combat to restore action bars." end
+    if GetCursorInfo() then return false,"Drop the item on your cursor before restoring." end
     if UnitInVehicle("player") or (HasOverrideActionBar and HasOverrideActionBar())
         or (HasVehicleActionBar and HasVehicleActionBar()) or (HasPossessBar and HasPossessBar()) then
-        return false,"Saia do veículo ou da barra temporária." end
+        return false,"Leave the vehicle or temporary action bar." end
     local undo=self.db.undo[self:ProfileKey()]
-    if not undo or #undo.changes==0 then return false,"Nenhuma aplicação anterior nesta especialização." end
-    return true,"Restaura a última aplicação e preserva suas edições posteriores."
+    if not undo or #undo.changes==0 then return false,"No previous application for this specialization." end
+    return true,"Restores the last application and preserves subsequent edits."
 end
 
 function MM:QueueAuto()
@@ -410,15 +410,15 @@ end
 function MM:PutSpell(slot,id)
     C_Spell.PickupSpell(id)
     local kind = GetCursorInfo()
-    if kind ~= "spell" then ClearCursor(); return false, "Não foi possível pegar a habilidade #"..id end
+    if kind ~= "spell" then ClearCursor(); return false, "Could not pick up ability #"..id end
     PlaceAction(slot)
     ClearCursor()
     local actualKind, actualID = GetActionInfo(slot)
-    if actualKind ~= "spell" then return false, "O jogo recusou o slot "..slot end
+    if actualKind ~= "spell" then return false, "The game rejected slot "..slot end
     if actualID ~= id then
         local base = C_SpellBook.FindBaseSpellByID(id)
         local override = C_SpellBook.FindSpellOverrideByID(id)
-        if actualID ~= base and actualID ~= override then return false, "Habilidade diferente no slot "..slot end
+        if actualID ~= base and actualID ~= override then return false, "Different ability in slot "..slot end
     end
     return true
 end
@@ -431,43 +431,43 @@ end
 function MM:Apply(automatic)
     if automatic and not self:AutoAuthorized() then return end
     if InCombatLockdown() then
-        if automatic then self.autoPending=true else self:Print("Saia do combate para aplicar.") end
+        if automatic then self.autoPending=true else self:Print("Leave combat to apply changes.") end
         return
     end
     if GetCursorInfo() then
         if automatic then self.autoPending=true end
-        if not automatic then self:Print("Solte o que está no cursor antes de aplicar.") end
+        if not automatic then self:Print("Drop the item on your cursor before applying.") end
         return
     end
     if UnitInVehicle("player") or (HasOverrideActionBar and HasOverrideActionBar())
         or (HasVehicleActionBar and HasVehicleActionBar()) or (HasPossessBar and HasPossessBar()) then
         if automatic then self.autoPending=true; return end
-        return self:Print("Aguarde sair do veículo ou da barra temporária.")
+        return self:Print("Wait until you leave the vehicle or temporary action bar.")
     end
     self:Scan()
     local settings = self:Settings()
     if settings.targetClass ~= self.current.class or settings.targetSpec ~= self.current.spec then
-        if not automatic then self:Print("Entre no personagem e na especialização de destino para aplicar.") end
+        if not automatic then self:Print("Log in to the destination character and specialization to apply.") end
         return
     end
     local reference, targets, _, matches = self:Context()
     if not reference then
-        if not automatic then self:Print("Capture as barras do seu main e selecione essa referência.") end
+        if not automatic then self:Print("Capture your main’s action bars and select that reference.") end
         return
     end
     if reference.key == self.current.key and not self:IsLevelingMode() then
-        if not automatic then self:Print("Esta é a própria referência. Selecione outro personagem ou especialização.") end
+        if not automatic then self:Print("This is the current reference. Select another character or specialization.") end
         return
     end
     local plan, skipped = self:BuildCurrentPlan(reference,matches,targets,self:ReadActions())
     if automatic and self:DescribePlanBindings(reference,plan)>0 then
         self:DisableAutomatic()
-        self:Print("Automático desativado: atalhos diferentes do main. Confira a prévia antes de aplicar.")
+        self:Print("Automatic mode disabled: keybindings differ from the main. Review the preview before applying.")
         self:RefreshUI()
         return
     end
     if #plan == 0 then
-        if not automatic then self:Print("Nenhuma alteração disponível. Pendentes / protegidos: "..skipped..".") end
+        if not automatic then self:Print("No changes available. Pending / protected: "..skipped..".") end
         return
     end
     -- Persist before first mutation. If a protected call errors, /mm undo can recover touched slots.
@@ -490,27 +490,27 @@ function MM:Apply(automatic)
         if not ok or not success then
             ClearCursor()
             self:DisableAutomatic()
-            self:Print("Aplicação interrompida: "..tostring(ok and reason or success)..". Use /mm undo.")
+            self:Print("Application interrupted: "..tostring(ok and reason or success)..". Use /mm undo.")
             break
         end
         applied=applied+1
     end
     self.applying=nil
     self:RecordLevelingLayout()
-    self:Print(applied.." slots aplicados. Pendentes / protegidos: "..skipped..". /mm undo desfaz.")
+    self:Print(applied.." slots applied. Pending / protected: "..skipped..". /mm undo will undo this.")
     self:RefreshUI()
 end
 
 function MM:Undo()
-    if InCombatLockdown() then return self:Print("Saia do combate para desfazer.") end
-    if GetCursorInfo() then return self:Print("Solte o que está no cursor antes de desfazer.") end
+    if InCombatLockdown() then return self:Print("Leave combat to undo changes.") end
+    if GetCursorInfo() then return self:Print("Drop the item on your cursor before undoing.") end
     if UnitInVehicle("player") or (HasOverrideActionBar and HasOverrideActionBar())
         or (HasVehicleActionBar and HasVehicleActionBar()) or (HasPossessBar and HasPossessBar()) then
-        return self:Print("Aguarde sair da barra temporária antes de desfazer.")
+        return self:Print("Wait until you leave the temporary action bar before undoing.")
     end
     local key = self:ProfileKey()
     local undo = self.db.undo[key]
-    if not undo then return self:Print("Não há aplicação para desfazer nesta especialização.") end
+    if not undo then return self:Print("There is no application to undo for this specialization.") end
     self:DisableAutomatic()
     local remaining, restored, changed = {}, 0, 0
     self.applying=true
@@ -531,7 +531,7 @@ function MM:Undo()
     self.applying=nil
     self:InvalidateContext()
     if #remaining == 0 then self.db.undo[key]=nil else undo.changes=remaining end
-    self:Print(restored.." slots restaurados; "..changed.." edições posteriores preservadas; "..#remaining.." pendentes. Automático desativado.")
+    self:Print(restored.." slots restored; "..changed.." later edits preserved; "..#remaining.." pending. Automatic mode disabled.")
     self:RefreshUI()
 end
 
@@ -577,7 +577,7 @@ events:SetScript("OnEvent",function(_,event,arg)
         MM:Scan()
         C_Timer.After(2,function() MM:SaveVisitedBars(); if MM.RefreshUI then MM:RefreshUI() end end)
         MM:QueueAuto()
-        MM:Print("/mm abre o editor. Comece capturando as barras do main.")
+        MM:Print("/mm opens the editor. Start by capturing your main’s action bars.")
     elseif event == "PLAYER_LOGOUT" then
         if not InCombatLockdown() then MM:Scan(); MM:SaveVisitedBars() end
     elseif MM.db and MM.current then

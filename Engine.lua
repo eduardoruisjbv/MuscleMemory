@@ -15,9 +15,9 @@ end
 function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
     if source.action or target.action then
         if source.action and target.action and source.id==target.id then
-            return 100,"Cópia exata da ação utilitária",false,{identity=true,rank=4}
+            return 100,"Exact copy of the utility action",false,{identity=true,rank=4}
         end
-        return 0,"Montarias e utilitários exigem a mesma ação da origem"
+        return 0,"Mounts and utilities require the same action as the source"
     end
     local identity,identityRank
     if self.SameAbility then identity,identityRank=self:SameAbility(source,target,sourceClass,targetClass) end
@@ -25,14 +25,14 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
         return 100,identity,false,{identity=true,rank=identityRank}
     end
     if self.IsActivePurpose and (not self:IsActivePurpose(source) or not self:IsActivePurpose(target)) then
-        return 0,"Habilidade passiva ou removida; não é um botão ativo equivalente"
+        return 0,"Passive or removed ability; not an equivalent active button"
     end
     local sourceID,targetID=source.baseID or source.id,target.baseID or target.id
     -- Identical learned racials and common abilities do not need a class-specific
     -- guess. Preserve them first, including references captured by older versions.
-    if source.id==target.id or sourceID==targetID then return 100,"Mesma habilidade disponível no destino",false,{identity=true,rank=3} end
-    if source.role == "unknown" or target.role == "unknown" then return 0,"Função ainda não classificada" end
-    if not source.curated or not target.curated then return 35,"Função estimada; escolha manualmente" end
+    if source.id==target.id or sourceID==targetID then return 100,"Same ability available on the destination",false,{identity=true,rank=3} end
+    if source.role == "unknown" or target.role == "unknown" then return 0,"Purpose not yet classified" end
+    if not source.curated or not target.curated then return 35,"Estimated purpose; choose manually" end
     local usageOK,usageReason,usageApproximate,usagePenalty,usageContext=true,"",false,0,{}
     if self.CompareUsage then usageOK,usageReason,usageApproximate,usagePenalty,usageContext=self:CompareUsage(source,target) end
     if not usageOK then return 60,usageReason end
@@ -45,11 +45,11 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
     local sharedPurpose=source.purpose and target.purpose and source.purpose.primary==target.purpose.primary
         and source.purpose.primary~="rotation"
     local family=roleFamilies[source.role]
-    if not sameRole and not emergency and not usageContext.damageWindow and not sharedPurpose and not approach and (not family or family~=roleFamilies[target.role]) then return 0,"Funções diferentes" end
+    if not sameRole and not emergency and not usageContext.damageWindow and not sharedPurpose and not approach and (not family or family~=roleFamilies[target.role]) then return 0,"Different purposes" end
     local approximate=not sameRole or usageApproximate
     local purpose=source.purpose and source.purpose.primary
     if not emergency and protectionRoles[source.role] and (not purpose or purpose=="damage_reduction" or purpose=="immunity") then
-        if not source.defenses or not target.defenses then return 35,"Tipo de proteção ainda não classificado" end
+        if not source.defenses or not target.defenses then return 35,"Protection type not yet classified" end
         local available={}
         for _,defense in ipairs(target.defenses) do available[defenseKey(defense)]=true end
         for _,defense in ipairs(source.defenses) do
@@ -60,7 +60,7 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
                         and defense.recipient==other.recipient and defense.cadence==other.cadence
                         and defense.coverage==other.coverage then compatible=true end
                 end
-                if not compatible then return 60,"Proteções diferentes: "..self:RoleLabel(source).." > "..self:RoleLabel(target) end
+                if not compatible then return 60,"Different protections: "..self:RoleLabel(source).." > "..self:RoleLabel(target) end
                 approximate=true
             end
         end
@@ -81,14 +81,14 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
                 -- An extra silence does not change the primary habit of stopping
                 -- a cast, but the alternative cannot promise that secondary effect.
                 approximate=true
-            else return 60,"Comportamento diferente (alvo, cura ou controle)" end
+            else return 60,"Different behavior (target, healing, or control)" end
         end
     end
     if source.role=="cc_break" and a.breaks~=b.breaks then approximate=true end
     if a.no_attack ~= b.no_attack then
-        if not emergency then return 60,"A alternativa muda a possibilidade de atacar" end
+        if not emergency then return 60,"The alternative changes whether you can attack" end
         approximate=true
-        usageReason=usageReason.."; possibilidade de agir ou atacar durante o efeito diferente"
+        usageReason=usageReason.."; whether actions or attacks are possible during the effect differs"
     end
     local pair=self.preferredPairs and self.preferredPairs[(sourceSpec or 0)..":"..(targetSpec or 0)]
     local choices=pair and pair[sourceID] or self.emergencyPairs and self.emergencyPairs[sourceID]
@@ -97,7 +97,7 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
             if id==targetID then
                 local x,y=source.rotation,target.rotation
                 local differs=x and y and (x.rhythm~=y.rhythm or x.flow~=y.flow)
-                local reason="Sugestão por finalidade e hábito de uso; recursos e mecânicas podem diferir"
+                local reason="Suggested by purpose and usage pattern; resources and mechanics may differ"
                 if usageReason~="" then reason=reason.."; "..usageReason end
                 return math.max(self.AUTO_SCORE,math.min(98,98-index-usagePenalty+(usageContext.bonus or 0))),reason,approximate or differs or false
             end
@@ -117,7 +117,7 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
     if source.costRatio and target.costRatio then
         score=score+math.max(0,4-math.abs(source.costRatio-target.costRatio)*10)
     end
-    local reason=approximate and "Alternativa por função e hábito de uso; veja diferenças no tooltip" or self:RoleLabel(source)
+    local reason=approximate and "Alternative by purpose and usage pattern; see tooltip for differences" or self:RoleLabel(source)
     if usageReason~="" then reason=reason.."; "..usageReason end
     return math.min(98,math.max(self.AUTO_SCORE,math.min(score,94)-usagePenalty+(usageContext.bonus or 0))),reason,approximate
 end
@@ -135,13 +135,13 @@ function MM:Suggest(reference,targets,overrides,targetSpec,targetClass)
     for sourceID,choice in pairs(overrides or {}) do
         if sources[sourceID] then
             if choice == false then
-                result[sourceID]={blocked=true,manual=true,status="excluded",reason="Você excluiu esta equivalência"}
+                result[sourceID]={blocked=true,manual=true,status="excluded",reason="You excluded this mapping"}
             else
                 local target=targets[choice]
-                local score,reason=0,"Habilidade indisponível"
+                local score,reason=0,"Ability unavailable"
                 if target then score,reason=self:Score(sources[sourceID],target,reference.spec,targetSpec,reference.class,targetClass) end
                 result[sourceID]={id=choice,score=score,manual=true,
-                    status=target and "matched" or "unavailable",reason="Sua escolha",
+                    status=target and "matched" or "unavailable",reason="Your choice",
                     warning=(not target or score<self.AUTO_SCORE) and reason or nil}
                 used[choice]=sourceID
             end
@@ -186,16 +186,16 @@ function MM:Suggest(reference,targets,overrides,targetSpec,targetClass)
                 or (protectionRoles[source.role] and not source.defenses)
             if source.action then
                 result[sourceID]={status="unavailable",reason=source.action.kind=="macro"
-                    and (source.action.body and "A macro com o mesmo conteúdo precisa existir no destino; o índice da origem não é reutilizado."
-                        or "Esta captura antiga não guardou o conteúdo da macro. Capture novamente as barras da origem.")
-                    or "A mesma ação utilitária não está disponível neste personagem; a posição atual será preservada."}
+                    and (source.action.body and "A macro with identical content must exist on the destination; the source index is not reused."
+                        or "This older capture did not save the macro contents. Capture the source action bars again.")
+                    or "The same utility action is unavailable on this character; the current slot will be preserved."}
             elseif unknown then
-                result[sourceID]={status="not_configured",reason="Classifique ou escolha uma habilidade manualmente"}
+                result[sourceID]={status="not_configured",reason="Classify or choose an ability manually"}
             elseif candidates[sourceID] then
-                result[sourceID]={status="not_configured",reason="Equivalente já reservado; escolha se deseja reutilizá-lo"}
+                result[sourceID]={status="not_configured",reason="Equivalent already reserved; choose whether to reuse it"}
             else
                 local refusal=rejected[sourceID]
-                result[sourceID]={status="no_direct_equivalent",reason=(refusal and refusal.reason or "Nenhuma alternativa compatível disponível").."; a ação atual será preservada"}
+                result[sourceID]={status="no_direct_equivalent",reason=(refusal and refusal.reason or "No compatible alternative available").."; the current action will be preserved"}
             end
         end
     end
