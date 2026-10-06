@@ -1,0 +1,6 @@
+package-as: MuscleMemory
+license-output: LICENSE
+ignore:
+    - .gitignore
+    - README.md
+    - CHANGELOG-0.7.0.md
