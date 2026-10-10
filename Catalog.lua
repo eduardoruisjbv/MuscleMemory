@@ -199,9 +199,14 @@ add("MONK", "cleanse", {115450,218164})
 add("MONK", "taunt", {115546})
 add("MONK", "resurrect", {115178})
 add("MONK", "heal", {116670,115151,124682})
-add("MONK", "builder", {100780}, {269})
+-- Tiger Palm is a learned class attack before spec selection, not WW-only.
+-- Only the Windwalker profile promises Chi generation.
+add("MONK", "core", {100780})
+MM.catalog[100780].variants={[269]="builder",[268]="core",[270]="core"}
 add("MONK", "spender", {100784,107428,113656}, {269})
-add("MONK", "aoe_spender", {101546}, {269})
+add("MONK", "aoe", {101546})
+MM.catalog[101546].variants={[269]="aoe_spender",[268]="aoe",[270]="aoe"}
+add("MONK", "filler", {117952})
 add("MONK", "core", {121253,100784}, {268})
 MM.catalog[100784].variants = {[269]="spender", [268]="core", [270]="core"}
 MM.catalog[100784].specs = nil

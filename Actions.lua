@@ -138,6 +138,25 @@ function MM:PutAction(slot,action)
         if kind~="mount" or id~=action.id then
             ClearCursor(); return false,"Could not pick up the exact source mount."
         end
+    elseif action.kind=="flyout" then
+        local bank=Enum.SpellBookSpellBank.Player
+        local found
+        for line=1,C_SpellBook.GetNumSpellBookSkillLines() do
+            local skill=C_SpellBook.GetSpellBookSkillLineInfo(line)
+            if skill then
+                for index=skill.itemIndexOffset+1,skill.itemIndexOffset+skill.numSpellBookItems do
+                    local item=C_SpellBook.GetSpellBookItemInfo(index,bank)
+                    if item and item.itemType==Enum.SpellBookItemType.Flyout and item.actionID==action.id then
+                        found=index; break
+                    end
+                end
+            end
+            if found then break end
+        end
+        if not found then return false,"O menu de habilidades não está disponível no grimório atual." end
+        C_SpellBook.PickupSpellBookItem(found,bank)
+        local kind,id=GetCursorInfo()
+        if kind~="flyout" or id~=action.id then ClearCursor(); return false,"Não foi possível recuperar o menu de habilidades." end
     elseif action.kind=="macro" then
         local id=self:FindExactMacro(action)
         if not id then return false,"The exact macro is unavailable on this character." end

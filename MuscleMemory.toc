@@ -2,7 +2,7 @@
 ## Title: MuscleMemory
 ## Notes: Keep abilities in the same action-bar slots across characters.
 ## Author: Eduardo Rui
-## Version: 0.7.0
+## Version: 0.7.7
 ## SavedVariables: MuscleMemoryDB
 ## IconTexture: Interface\Icons\Spell_Nature_Strength
 
@@ -13,6 +13,7 @@ Effects.lua
 FunctionModel.lua
 Engine.lua
 Core.lua
+Collection.lua
 Actions.lua
 Leveling.lua
 UI.lua

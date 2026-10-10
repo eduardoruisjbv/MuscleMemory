@@ -13,6 +13,7 @@ end
 -- Suggest by habit of use. Protection scope, healing targets and control types
 -- remain constraints; rotation context ranks candidates instead of blocking them.
 function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
+    if source.isPassive or target.isPassive or target.offSpec then return 0,"Passiva ou habilidade de outra especialização" end
     if source.action or target.action then
         if source.action and target.action and source.id==target.id then
             return 100,"Exact copy of the utility action",false,{identity=true,rank=4}
@@ -30,9 +31,14 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
     local sourceID,targetID=source.baseID or source.id,target.baseID or target.id
     -- Identical learned racials and common abilities do not need a class-specific
     -- guess. Preserve them first, including references captured by older versions.
+    if source.isPassive or target.isPassive or target.offSpec then return 0,"Passive or off-spec ability" end
     if source.id==target.id or sourceID==targetID then return 100,"Same ability available on the destination",false,{identity=true,rank=3} end
     if source.role == "unknown" or target.role == "unknown" then return 0,"Purpose not yet classified" end
     if not source.curated or not target.curated then return 35,"Estimated purpose; choose manually" end
+    if self.ProgressiveDamageScore then
+        local score,reason,approximate=self:ProgressiveDamageScore(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
+        if score then return score,reason,approximate end
+    end
     local usageOK,usageReason,usageApproximate,usagePenalty,usageContext=true,"",false,0,{}
     if self.CompareUsage then usageOK,usageReason,usageApproximate,usagePenalty,usageContext=self:CompareUsage(source,target) end
     if not usageOK then return 60,usageReason end
@@ -209,7 +215,8 @@ function MM:BuildPlan(reference,matches,known,actions)
         if self:IsManagedSlot(slot) and source and self:ActionKey(source) then
             local sourceID=self:ActionKey(source)
             local match,current=matches[sourceID],actions[slot]
-            if match and match.id and known[match.id] then
+            if match and match.id and known[match.id] and known[match.id].learned~=false
+                and not known[match.id].isPassive and not known[match.id].offSpec then
                 local after=known[match.id].action or {kind="spell",id=match.id}
                 if current and current.kind~="spell" and current.kind~="summonmount" and not self:ActionMatches(current,after) then skipped=skipped+1
                 elseif not self:ActionMatches(current,after) then

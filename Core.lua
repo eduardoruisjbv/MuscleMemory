@@ -1,6 +1,6 @@
 local addonName, MM = ...
 MM.MAX_SLOT = 180
-MM.version = "0.7.0"
+MM.version = "0.7.7"
 local bank = Enum.SpellBookSpellBank.Player
 local specAPI = C_SpecializationInfo
 
@@ -61,6 +61,8 @@ function MM:Settings()
         settings.autoMode,settings.auto="leveling",true
         settings.autoConsent,settings.autoConsentMode=self.AUTO_CONSENT_VERSION,"leveling"
         settings.targetClass,settings.targetSpec=class,spec
+        local context=self.db.levelingContext and self.db.levelingContext[guid]
+        if context then settings.sourceKey,settings.translator=context.sourceKey,context.translator end
     end
     return settings
 end
@@ -153,24 +155,144 @@ function MM:GetBindingForSlot(slot,reference)
     return #labels>0 and table.concat(labels," / ") or "No keybinding",keys
 end
 
-function MM:Scan()
+function MM:RefreshLearnedState()
+    if InCombatLockdown() then self.scanPending=true; return end
+    local guid,_,_,spec=self:Identity()
+    if not self.current or self.current.key~=guid..":"..spec or self.spellbookDirty then
+        return self:Scan(true)
+    end
+    self.knownDirty=nil
+    self.scanPending=nil
+    local changed=false
+    for _,spell in pairs(self.current.spells) do
+        local learned=not spell.offSpec and (C_SpellBook.IsSpellKnown(spell.id,bank)==true
+            or spell.baseID and C_SpellBook.IsSpellKnown(spell.baseID,bank)==true) or false
+        if spell.learned~=learned then
+            spell.learned=learned
+            spell.functions=nil
+            if learned then
+                -- Future entries may not yet report the passive flag. Resolve
+                -- only this newly unlocked entry, rather than rebuilding the book.
+                local slot,spellBank=C_SpellBook.FindSpellBookSlotForSpell(spell.id,false,false,false,false)
+                local item=slot and spellBank==bank and C_SpellBook.GetSpellBookItemInfo(slot,bank)
+                if item then spell.isPassive=item.isPassive end
+                if self.ReadUsageMetadata then self:ReadUsageMetadata(spell) end
+            end
+            changed=true
+        end
+    end
+    if changed then
+        self.current.updated=time()
+        local observed=self.db.characters[self.current.key]
+        if observed then observed.spells=self:Copy(self.current.spells); observed.updated=self.current.updated end
+        self:InvalidateContext()
+        if self.RefreshUI then self:RefreshUI() end
+    end
+end
+
+-- Read every ability granted by the active class/spec/hero talent trees. Talent
+-- alternatives are retained as candidates, while only the selected entry is
+-- marked learned. This supplements the spellbook, which does not expose every
+-- unselected or preview-only talent spell as a regular spellbook row.
+function MM:ReadTalentSpells(class,spec,spells)
+    local snapshot={}
+    if not C_ClassTalents or not C_ClassTalents.GetActiveConfigID or not C_Traits
+        or not C_Traits.GetConfigInfo or not C_Traits.GetTreeNodes or not C_Traits.GetNodeInfo
+        or not C_Traits.GetEntryInfo or not C_Traits.GetDefinitionInfo then
+        return snapshot
+    end
+    local ok,configID=pcall(C_ClassTalents.GetActiveConfigID)
+    if not ok or not configID then return snapshot end
+    local configOK,config=pcall(C_Traits.GetConfigInfo,configID)
+    if not configOK or not config then return snapshot end
+
+    for _,treeID in ipairs(config.treeIDs or {}) do
+        local nodesOK,nodeIDs=pcall(C_Traits.GetTreeNodes,treeID)
+        if nodesOK then
+            for _,nodeID in ipairs(nodeIDs or {}) do
+                local nodeOK,node=pcall(C_Traits.GetNodeInfo,configID,nodeID)
+                if nodeOK and node and node.isVisible~=false then
+                    local active=node.activeEntry
+                    local activeEntryID=active and active.entryID
+                    local rank=active and active.rank or 0
+                    for _,entryID in ipairs(node.entryIDs or {}) do
+                        local entryOK,entry=pcall(C_Traits.GetEntryInfo,configID,entryID)
+                        local definition
+                        if entryOK and entry and entry.definitionID then
+                            local definitionOK,value=pcall(C_Traits.GetDefinitionInfo,entry.definitionID)
+                            if definitionOK then definition=value end
+                        end
+                        local spellID=definition and definition.spellID
+                        if type(spellID)=="number" and spellID>0 then
+                            local selected=entryID==activeEntryID and rank>0
+                            local talent={treeID=treeID,nodeID=nodeID,entryID=entryID,
+                                selected=selected,rank=selected and rank or 0}
+                            snapshot[spellID]=talent
+                            local known=spells[spellID]
+                            if known then
+                                known.talent=true
+                                known.talentSelected=selected
+                                known.talentNodeID=nodeID
+                                known.talentEntryID=entryID
+                                if selected then known.learned=true end
+                            else
+                                local candidate=self:CatalogEntry(spellID,class,spec) or {id=spellID,role="unknown"}
+                                candidate.id,candidate.class=spellID,class
+                                candidate.name=definition.overrideName or self:SpellInfo(spellID).name
+                                candidate.icon=definition.overrideIcon or self:SpellInfo(spellID).iconID
+                                candidate.talent,candidate.talentSelected=true,selected
+                                candidate.talentNodeID,candidate.talentEntryID=nodeID,entryID
+                                candidate.learned=selected
+                                local slot,spellBank
+                                if C_SpellBook.FindSpellBookSlotForSpell then
+                                    slot,spellBank=C_SpellBook.FindSpellBookSlotForSpell(spellID,false,false,false,false)
+                                end
+                                local item=slot and spellBank==bank and C_SpellBook.GetSpellBookItemInfo(slot,bank)
+                                local passiveOK,isPassive
+                                if C_Spell and C_Spell.IsSpellPassive then
+                                    passiveOK,isPassive=pcall(C_Spell.IsSpellPassive,spellID)
+                                end
+                                candidate.isPassive=item and item.isPassive or passiveOK and isPassive or false
+                                if self.ReadUsageMetadata then self:ReadUsageMetadata(candidate) end
+                                spells[spellID]=candidate
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return snapshot
+end
+
+function MM:Scan(force)
     if InCombatLockdown() then self.scanPending = true; return end
     self.scanPending = nil
     local guid, class, classID, spec, specName = self:Identity()
+    if not force and not self.spellbookDirty and self.current and self.current.key==guid..":"..spec then
+        if self.knownDirty then self:RefreshLearnedState() end
+        return
+    end
+    self.spellbookDirty,self.knownDirty=nil,nil
     local spells = {}
     for line=1,C_SpellBook.GetNumSpellBookSkillLines() do
         local skill = C_SpellBook.GetSpellBookSkillLineInfo(line)
-        if skill and not skill.isGuild and not skill.offSpecID then
+        if skill and not skill.isGuild then
             for slot=skill.itemIndexOffset+1,skill.itemIndexOffset+skill.numSpellBookItems do
                 local item = C_SpellBook.GetSpellBookItemInfo(slot, bank)
-                if item and item.itemType == Enum.SpellBookItemType.Spell
-                    and item.spellID and not item.isPassive and not item.isOffSpec then
-                    local id = item.spellID
-                    local entry = self:CatalogEntry(id,class,spec)
-                        or self:CatalogEntry(item.actionID,class,spec)
+                if item and (item.itemType == Enum.SpellBookItemType.Spell
+                    or item.itemType == Enum.SpellBookItemType.FutureSpell) and (item.spellID or item.actionID) then
+                    local id = item.spellID or item.actionID
+                    local entrySpec=skill.offSpecID or spec
+                    local entry = self:CatalogEntry(id,class,entrySpec)
+                        or self:CatalogEntry(item.actionID,class,entrySpec)
                         or {id=id, role="unknown"}
                     entry.id = id
-                    entry.class,entry.learned=class,true
+                    entry.class=class
+                    entry.offSpec=item.isOffSpec or skill.offSpecID~=nil
+                    entry.isPassive=item.isPassive
+                    entry.learned=not entry.offSpec and C_SpellBook.IsSpellKnown(id,bank)==true or false
+                    entry.levelLearned=C_SpellBook.GetSpellBookItemLevelLearned(slot,bank)
                     entry.baseID = item.actionID
                     entry.name, entry.icon = item.name, item.iconID
                     local info = self:SpellInfo(id)
@@ -196,18 +318,55 @@ function MM:Scan()
                         entry.role="mount"
                         entry.purpose={primary="travel",cadence="utility",description="Travel / fly / move faster using the selected mount."}
                     end
-                    spells[id] = entry
+                    -- Active-spec copies take precedence when a common spell is
+                    -- listed again in another specialization's section.
+                    if not spells[id] or spells[id].offSpec then spells[id] = entry end
+                elseif item and item.itemType == Enum.SpellBookItemType.Flyout and item.actionID
+                    and GetFlyoutInfo and GetFlyoutSlotInfo then
+                    local ok,_,_,count,isKnown=pcall(GetFlyoutInfo,item.actionID)
+                    if ok and type(count)=="number" and isKnown then
+                        for flyoutSlot=1,count do
+                            local slotOK,spellID,overrideID,slotKnown,name=pcall(GetFlyoutSlotInfo,item.actionID,flyoutSlot)
+                            if slotOK and slotKnown and type(spellID)=="number" and spellID>0 then
+                                local entry=spells[spellID] or self:CatalogEntry(spellID,class,spec)
+                                    or {id=spellID,role="unknown"}
+                                entry.id,entry.class=spellID,class
+                                entry.name=entry.name or name or self:SpellInfo(spellID).name
+                                entry.icon=entry.icon or self:SpellInfo(overrideID or spellID).iconID
+                                entry.flyout=true
+                                entry.baseID=entry.baseID or C_SpellBook.FindBaseSpellByID(spellID)
+                                entry.overrideID=overrideID
+                                entry.learned=true
+                                local slot,spellBank=C_SpellBook.FindSpellBookSlotForSpell(spellID,false,false,false,false)
+                                local spellInfo=slot and spellBank==bank and C_SpellBook.GetSpellBookItemInfo(slot,bank)
+                                local passiveOK,isPassive
+                                if C_Spell and C_Spell.IsSpellPassive then
+                                    passiveOK,isPassive=pcall(C_Spell.IsSpellPassive,spellID)
+                                end
+                                entry.isPassive=spellInfo and spellInfo.isPassive or passiveOK and isPassive or false
+                                if self.ReadUsageMetadata then self:ReadUsageMetadata(entry) end
+                                spells[spellID]=entry
+                            end
+                        end
+                    end
                 end
             end
         end
+    end
+    local talents=self:ReadTalentSpells(class,spec,spells)
+    if not next(spells) then
+        self.spellbookDirty=true
+        self.scanPending=true
+        return
     end
     local assisted=self:ReadAssistedRotation(spells)
     local playerName, realm = UnitFullName("player")
     local race,raceID
     if UnitRace then local raceName; raceName,race,raceID=UnitRace("player") end
     self.current = {key=guid..":"..spec, class=class, classID=classID, spec=spec,race=race,raceID=raceID,
-        specName=specName, name=playerName.." - "..(realm or GetRealmName()), spells=spells,
+        specName=specName, name=playerName.." - "..(realm or GetRealmName()), spells=spells,talents=talents,
         updated=time(),assisted=assisted}
+    if self.StoreCollectionSnapshot then self:StoreCollectionSnapshot() end
     local previous=self.db.characters[self.current.key]
     local observed=self:Copy(self.current)
     if previous then
@@ -232,7 +391,7 @@ function MM:Capture()
         return self:Print("Disable automatic application before capturing a new reference.")
     end
     self:Scan()
-    if not next(self.current.spells) then return self:Print("The spellbook has not loaded yet. Try again.") end
+    if not self.current or not next(self.current.spells) then return self:Print("The spellbook has not loaded yet. Try again.") end
     local reference = self:Copy(self.current)
     reference.actions = self:ReadActions()
     reference.bindings = self:Copy(self:ReadBindings())
@@ -247,7 +406,7 @@ end
 
 function MM:TargetSpells(class, spec)
     if self.current and class == self.current.class and spec == self.current.spec then
-        return self.current.spells, "Current spellbook"
+        return self.current.spells, next(self.current.talents or {}) and "Current spellbook + active talents" or "Current spellbook"
     end
     local result = {}
     for id,catalog in pairs(self.catalog) do
@@ -271,15 +430,14 @@ function MM:TargetSpells(class, spec)
             observed=true
         end
     end
-    return result, observed and "Catalog + visited characters" or "Base catalog; talents not verified"
+    return result, observed and "Catalog + visited spellbooks and talents" or "Base catalog; talents not verified"
 end
 
 function MM:Context()
     local settings = self:Settings()
     local reference = self.db.references[settings.sourceKey] or self.db.characters[settings.sourceKey]
     if reference and not reference.actions then reference=nil end
-    if self:IsLevelingMode() then reference=self:LevelingReference() end
-    local key = (self:IsLevelingMode() and ("leveling:"..self.current.key) or settings.sourceKey or "none")..">"..(settings.targetClass or "")..":"..(settings.targetSpec or 0)
+    local key = (settings.sourceKey or "none")..">"..(settings.targetClass or "")..":"..(settings.targetSpec or 0)
     if self.contextCache and self.contextCache.key == key then
         local cache=self.contextCache
         return cache.reference,cache.targets,cache.overrides,cache.matches,cache.label
@@ -310,7 +468,24 @@ function MM:Context()
     local targets, label = self:TargetSpells(settings.targetClass,settings.targetSpec)
     targets=self:UtilityTargets(reference,targets)
     local overrides = self.db.overrides[key]
-    local matches = reference and self:Suggest(reference,targets,overrides,settings.targetSpec,settings.targetClass) or {}
+    local available,planned={},{}
+    for id,spell in pairs(targets) do
+        if not spell.isPassive and not spell.offSpec then
+            planned[id]=spell
+            if spell.learned~=false then available[id]=spell end
+        end
+    end
+    local matches = reference and self:Suggest(reference,available,overrides,settings.targetSpec,settings.targetClass) or {}
+    if reference then
+        local future=self:Suggest(reference,planned,overrides,settings.targetSpec,settings.targetClass)
+        for id,match in pairs(matches) do
+            local suggestion=future[id]
+            if suggestion and suggestion.id and targets[suggestion.id] and targets[suggestion.id].learned==false then
+                match.future=self:Copy(suggestion)
+                match.future.status="future"
+            end
+        end
+    end
     self.contextCache={key=key,reference=reference,targets=targets,overrides=overrides,matches=matches,label=label}
     return reference, targets, overrides, matches, label
 end
@@ -385,6 +560,54 @@ function MM:GetPreview()
     return preview
 end
 
+function MM:GetClearBarsState()
+    if InCombatLockdown() then return false,"Saia do combate para limpar as barras." end
+    if GetCursorInfo() then return false,"Solte o que está no cursor antes de limpar." end
+    if UnitInVehicle("player") or (HasOverrideActionBar and HasOverrideActionBar())
+        or (HasVehicleActionBar and HasVehicleActionBar()) or (HasPossessBar and HasPossessBar()) then
+        return false,"Saia do veículo ou da barra temporária antes de limpar."
+    end
+    for slot=1,self.MAX_SLOT do
+        if self:IsManagedSlot(slot) and GetActionInfo(slot) then
+            return true,"Esvazia as barras normais, incluindo macros, itens e montarias. Mantém as teclas e a referência salva; pausa o automático. Restaurar barras desfaz."
+        end
+    end
+    return false,"As barras normais já estão vazias."
+end
+
+function MM:ClearBars()
+    local allowed,reason=self:GetClearBarsState()
+    if not allowed then return self:Print(reason) end
+    self:Scan()
+    local actions=self:ReadActions()
+    local undo={key=self.current.key,changes={},created=time(),clearPending=true}
+    -- Journal the complete snapshot before touching the first slot. A later
+    -- Apply merges into this journal, so Restore returns to before the cleanup.
+    for slot=1,self.MAX_SLOT do
+        if self:IsManagedSlot(slot) and actions[slot] then
+            undo.changes[#undo.changes+1]={slot=slot,before=self:Copy(actions[slot]),after=false,clearing=true}
+        end
+    end
+    self.db.undo[self.current.key]=undo
+    self:DisableAutomatic()
+    self.autoPending=nil
+    self.applying=true
+    local cleared=0
+    for _,change in ipairs(undo.changes) do
+        local ok,success,errorMessage=pcall(self.PutAction,self,change.slot,nil)
+        if not ok or not success then
+            ClearCursor()
+            self:Print("Limpeza interrompida: "..tostring(ok and errorMessage or success)..". Restaurar barras recupera as posições removidas.")
+            break
+        end
+        cleared=cleared+1
+    end
+    self.applying=nil
+    self:InvalidateContext()
+    self:Print(cleared.." posições limpas. Use Aplicar sugestões para preencher; Restaurar barras desfaz. Automático pausado.")
+    self:RefreshUI()
+end
+
 function MM:GetUndoState()
     if InCombatLockdown() then return false,"Leave combat to restore action bars." end
     if GetCursorInfo() then return false,"Drop the item on your cursor before restoring." end
@@ -404,6 +627,18 @@ function MM:QueueAuto()
         if InCombatLockdown() then self.autoPending=true; return end
         self.autoPending=nil
         if self:AutoAuthorized() then self:Apply(true) end
+    end)
+end
+
+-- Coalesce native changes into one availability update of the cached list.
+function MM:QueueSpellRefresh()
+    self.knownDirty=true
+    if self.spellRefreshQueued then return end
+    self.spellRefreshQueued=true
+    C_Timer.After(0.25,function()
+        self.spellRefreshQueued=nil
+        self:Scan()
+        self:QueueAuto()
     end)
 end
 
@@ -471,8 +706,12 @@ function MM:Apply(automatic)
         return
     end
     -- Persist before first mutation. If a protected call errors, /mm undo can recover touched slots.
-    local undo = automatic and self.db.undo[self.current.key]
-    if not undo or not undo.automatic then undo={key=self.current.key,changes={},created=time(),automatic=automatic} end
+    local previous=self.db.undo[self.current.key]
+    local undo=previous and previous.clearPending and previous or (automatic and previous)
+    if not undo or not undo.automatic and not undo.clearPending then
+        undo={key=self.current.key,changes={},created=time(),automatic=automatic}
+    end
+    undo.clearPending=nil
     self.db.undo[self.current.key] = undo
     local applied = 0
     self.applying=true
@@ -496,6 +735,9 @@ function MM:Apply(automatic)
         applied=applied+1
     end
     self.applying=nil
+    if self:IsLevelingMode() and self.levelingUnplaced and #self.levelingUnplaced>0 then
+        self:Print("Aprendidas ainda sem espaço nas barras: "..table.concat(self.levelingUnplaced,", "))
+    end
     self:RecordLevelingLayout()
     self:Print(applied.." slots applied. Pending / protected: "..skipped..". /mm undo will undo this.")
     self:RefreshUI()
@@ -543,6 +785,7 @@ events:RegisterEvent("PLAYER_LOGOUT")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("SPELLS_CHANGED")
 events:RegisterEvent("PLAYER_LEVEL_UP")
+events:RegisterEvent("LEARNED_SPELL_IN_SKILL_LINE")
 events:RegisterEvent("NEW_MOUNT_ADDED")
 events:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 events:RegisterEvent("CURSOR_CHANGED")
@@ -557,9 +800,11 @@ events:SetScript("OnEvent",function(_,event,arg)
     if event == "ADDON_LOADED" and arg == addonName then
         MuscleMemoryDB = MuscleMemoryDB or {}
         MM.db=MuscleMemoryDB
-        for _,key in ipairs({"characters","references","settings","overrides","undo","levelingAuto"}) do
+        for _,key in ipairs({"characters","references","settings","overrides","undo","levelingAuto","levelingContext"}) do
             MM.db[key] = MM.db[key] or {}
         end
+        MM.db.collection = MM.db.collection or {characters={}}
+        MM.db.collection.characters = MM.db.collection.characters or {}
         MM.db.schema=3
         for _,settings in pairs(MM.db.settings) do
             if settings.autoConsent~=MM.AUTO_CONSENT_VERSION then settings.auto=false end
@@ -583,10 +828,14 @@ events:SetScript("OnEvent",function(_,event,arg)
     elseif MM.db and MM.current then
         if event == "UPDATE_BINDINGS" or event == "ACTIONBAR_PAGE_CHANGED" then
             if InCombatLockdown() then MM.bindingsPending=true else MM:ReadBindings() end
+            if event == "UPDATE_BINDINGS" then MM:QueueAuto() end
             if event == "ACTIONBAR_PAGE_CHANGED" and MM.RefreshUI then MM:RefreshUI() end
         elseif event == "ACTIONBAR_SLOT_CHANGED" then
             MM:InvalidateContext()
-            if not MM.applying and MM.RefreshUI then MM:RefreshUI() end
+            if not MM.applying then
+                if MM:AutoAuthorized() then MM:QueueAuto() end
+                if MM.RefreshUI then MM:RefreshUI() end
+            end
         elseif event == "CURSOR_CHANGED" or event == "UPDATE_VEHICLE_ACTIONBAR" or event == "UPDATE_OVERRIDE_ACTIONBAR" then
             if MM.autoPending and not GetCursorInfo() then MM:QueueAuto() end
         elseif event == "SPELL_DATA_LOAD_RESULT" then
@@ -595,8 +844,16 @@ events:SetScript("OnEvent",function(_,event,arg)
             if MM.bindingsPending then MM.bindingsPending=nil; MM:ReadBindings() end
             if MM.scanPending then MM:Scan() end
             if MM.autoPending then MM:QueueAuto() end
-        elseif event == "SPELLS_CHANGED" or event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_LEVEL_UP" or event == "NEW_MOUNT_ADDED"
+        elseif event == "PLAYER_LEVEL_UP" or event == "LEARNED_SPELL_IN_SKILL_LINE" or event == "SPELLS_CHANGED" then
+            -- An ability absent from the cached book means the book itself changed,
+            -- e.g. a new profession; ordinary level unlocks only change availability.
+            if event=="LEARNED_SPELL_IN_SKILL_LINE" and not MM:FindProfileSpell(MM.current.spells,arg) then
+                MM.spellbookDirty=true
+            end
+            MM:QueueSpellRefresh()
+        elseif event == "TRAIT_CONFIG_UPDATED" or event == "NEW_MOUNT_ADDED"
             or (event == "PLAYER_SPECIALIZATION_CHANGED" and arg == "player") then
+            MM.spellbookDirty=true
             if MM.scanQueued then return end
             MM.scanQueued=true
             C_Timer.After(0.5,function()
@@ -615,5 +872,12 @@ SlashCmdList.MUSCLEMEMORY=function(message)
     if message == "capture" then MM:Capture()
     elseif message == "apply" then MM:Apply()
     elseif message == "undo" then MM:Undo()
+    elseif message == "clear" or message == "limpar" then MM:ClearBars()
+    elseif message == "collect" then MM:ToggleCollection()
+    elseif message == "collect on" or message == "collect start" then MM:SetCollectionEnabled(true)
+    elseif message == "collect off" or message == "collect stop" then MM:SetCollectionEnabled(false)
+    elseif message == "collect status" then MM:PrintCollectionStatus()
+    elseif message == "collect clear" then MM:ClearCollection()
+    elseif message == "export" or message == "collect export" then MM:ShowCollectionExport()
     else MM:ToggleUI() end
 end

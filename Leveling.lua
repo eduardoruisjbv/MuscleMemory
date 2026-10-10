@@ -1,228 +1,205 @@
 local _, MM = ...
-MM.AUTO_CONSENT_VERSION=1
-
--- Layout defaults: these rank keys on a bar, not the next cast in combat.
--- The user can change the order and pin skills. Procs are never used to move bars.
-local rotationRoles={core=true,builder=true,spender=true,filler=true,damage=true,dot=true,execute=true,
-    proc_builder=true,proc_spender=true,aoe_proc_spender=true,aoe_builder=true,aoe_spender=true,
-    aoe=true,burst=true,mitigation=true,heal=true,empowered=true}
-local rolePriority={core=20,builder=30,proc_builder=35,spender=40,proc_spender=45,empowered=48,
-    heal=50,mitigation=55,dot=60,execute=65,aoe_builder=70,aoe_spender=75,aoe_proc_spender=78,
-    aoe=80,burst=90,filler=95,damage=100}
-local specOrder={
-    [71]={12294,7384,5308,772,845,1464,167105,107574},
-    [72]={184367,23881,85288,5308,1680,1719,107574,1464},
-    [73]={23922,6343,2565,190456,6572},
-    [70]={85256,383328,184575,20271,53385,24275,31884},
-    [253]={34026,217200,193455,257620,19574},
-    [259]={32645,1329,1943,703,51723,121411,360194},
-    [258]={335467,8092,34914,589,32379,15407},
-    [257]={2050,2061,2060,139,585},
-    [251]={49020,49143,49184,207230,194913,51271,279302},
-    [250]={49998,195182,50842,206930,43265},
-    [262]={51505,8042,188389,188196,61882,188443,114050},
-    [63]={11366,108853,133,2120,190319},
-    [64]={116,30455,44614,84714,12472},
-    [267]={116858,17962,29722,348,5740,1122},
-    [269]={107428,113656,100784,100780,101546},
-    [103]={1079,5221,1822,22568,106785,5217},
-    [577]={162794,198013,188499,232893,162243,191427},
-    [1467]={357208,359073,356995,361469,357211,375087},
-}
+MM.AUTO_CONSENT_VERSION=2
 
 function MM:IsLevelingMode()
     return self:Settings().autoMode=="leveling"
 end
 
-function MM:LevelingPriority(spell)
-    local settings=self:Settings()
-    local id=spell.baseID or spell.id
-    local custom=settings.levelingPriority or {}
-    if custom[spell.id] or custom[id] then return custom[spell.id] or custom[id] end
-    for index,knownID in ipairs(specOrder[self.current.spec] or {}) do
-        if spell.id==knownID or id==knownID then return 1000+index end
-    end
-    local rhythm=spell.rotation and spell.rotation.rhythm
-    return 2000+(rhythm=="core" and 0 or 100)+(rolePriority[spell.role] or 500)
+local function caster(class,spec)
+    return class=="MAGE" or class=="WARLOCK" or class=="PRIEST" or class=="EVOKER"
+        or class=="SHAMAN" and (spec==262 or spec==264)
+        or class=="DRUID" and (spec==102 or spec==105)
 end
 
-function MM:IsCombatLayoutSpell(spell)
-    return rotationRoles[spell.role]==true
+-- Resource names and cast style differ across archetypes; the button's intent
+-- remains the anchor. Never turn healing/defence/control into generic damage.
+function MM:ProgressiveDamageScore(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
+    if not self.db or not self.current then return end
+    local translator=self:Settings().translator
+        and caster(sourceClass,sourceSpec)~=caster(targetClass,targetSpec)
+    if not self:IsLevelingMode() and not translator then return end
+    if source.action or target.action or not source.curated or not target.curated then return end
+    local a,b=self:GetFunctionProfile(source),self:GetFunctionProfile(target)
+    if a.damage~="primary" or b.damage~="primary" or a.area~=b.area then return end
+    local special={burst=true,execute=true,dot=true,empowered=true}
+    if special[source.role] or special[target.role] then return end
+    local x,y=self:UsageCooldown(source),self:UsageCooldown(target)
+    if x and y and (x>20 or y>20) then return end
+    local ap,bp=source.purpose or {},target.purpose or {}
+    if bp.condition and bp.condition~=ap.condition then return end
+    local score,reason=82,"Dano disponível; substituto temporário sem todas as funções da origem"
+    local tags={"generate_resource","spend_resource","prepare_proc","consume_proc"}
+    local required,shared=0,0
+    for _,tag in ipairs(tags) do
+        if a.secondary[tag] then
+            required=required+1
+            if b.secondary[tag] then shared=shared+1 end
+        end
+    end
+    if required>0 and shared==required then
+        score,reason=96,"Mesma função de dano e recurso/proc, mesmo com outra mecânica de classe"
+    elseif shared>0 then score,reason=90,"Dano e parte da função de recurso/proc da origem"
+    elseif required==0 then score,reason=88,"Mesma função de dano; mecânica de recurso/proc pode diferir" end
+    local ar,br=source.rotation or {},target.rotation or {}
+    if ar.rhythm and ar.rhythm==br.rhythm then score=score+1 end
+    if source.role==target.role then score=score+1 end
+    if translator then reason="Translator melee ↔ caster: "..reason end
+    if required>shared then reason=reason.."; geração/gasto/proc ausente não é considerado equivalente" end
+    return score,reason,true
 end
 
-function MM:LevelingSpells()
-    local combat,utility={},{}
-    local settings=self:Settings()
-    local excluded=settings.levelingExcluded or {}
-    local candidates={}
-    for _,spell in pairs(self.current.spells) do
-        local identity=spell.baseID or spell.id
-        if not spell.action and not excluded[spell.id] and not excluded[identity]
-            and spell.role~="mount" and not spell.isAssistant then
-            local previous=candidates[identity]
-            local override=C_SpellBook.FindSpellOverrideByID(identity)
-            if not previous or spell.id==override or previous.id~=override and spell.id>previous.id then
-                candidates[identity]=spell
-            end
-        end
-    end
-    for _,spell in pairs(candidates) do
-            local list=rotationRoles[spell.role] and combat or utility
-            list[#list+1]=spell
-    end
-    table.sort(combat,function(a,b)
-        local x,y=self:LevelingPriority(a),self:LevelingPriority(b)
-        return x==y and a.id<b.id or x<y
-    end)
-    table.sort(utility,function(a,b) return a.id<b.id end)
-    return combat,utility
-end
-
-function MM:LevelingLayout(actions)
-    local settings=self:Settings()
-    local combat,utility=self:LevelingSpells()
-    local desired,occupied,placed={},{},{}
-    local protected=0
-    local pins=settings.levelingPins or {}
-    local excluded=settings.levelingExcluded or {}
-    local previous=settings.levelingOwned or {}
-    -- Exact travel/actions, unknown existing spells and utility positions are reserved.
-    for slot=1,self.MAX_SLOT do
-        if self:IsManagedSlot(slot) then
-            local action=actions[slot]
-            if action then
-                local spell=action.kind=="spell" and self:FindProfileSpell(self.current.spells,action.id)
-                if action.kind~="spell" or not spell and not previous[slot]
-                    or spell and (not rotationRoles[spell.role] or excluded[spell.id] or excluded[spell.baseID]) then
-                    desired[slot]=self:Copy(action); occupied[slot]=true
-                    if spell then placed[spell.baseID or spell.id]=true end
-                end
-            end
-        end
-    end
-    -- Travel keys follow the selected origin, even while combat keys evolve.
-    local source=self.db.references[settings.sourceKey] or self.db.characters[settings.sourceKey]
-    local pinnedSlots={}
-    for _,slot in pairs(pins) do pinnedSlots[slot]=true end
-    for slot,action in pairs(source and source.actions or {}) do
-        if self:IsManagedSlot(slot) and not pinnedSlots[slot] then
-            local entry=self:ActionEntry(action)
-            if entry and entry.role=="mount" and (not occupied[slot] or desired[slot].kind=="summonmount" or desired[slot].mountID~=nil) then
-                local available=self:ResolveUtilityAction(entry.action)
-                if available then desired[slot]=available; occupied[slot]=true end
-            end
-        end
-    end
-    -- A pinned ability reserves its current/explicit position before sorting the rest.
-    for _,list in ipairs({combat,utility}) do
-        for _,spell in ipairs(list) do
-            local slot=pins[spell.id] or pins[spell.baseID]
-            if slot and self:IsManagedSlot(slot) and not occupied[slot] then
-                desired[slot]={kind="spell",id=spell.id}; occupied[slot]=true
-                placed[spell.baseID or spell.id]=true
-            elseif slot and not placed[spell.baseID or spell.id] then
-                -- Never silently move a pinned spell when another protected action occupies its key.
-                placed[spell.baseID or spell.id]=true; protected=protected+1
-            end
-        end
-    end
-    local available={}
-    -- Default main page first, then real bindings and auxiliary bars. Paging the
-    -- main bar must not change the chosen layout on the next level-up.
-    local bindings=self:ReadBindings()
-    for pass=1,4 do
-        for slot=1,self.MAX_SLOT do
-            if self:IsManagedSlot(slot) and not occupied[slot] then
-                local primary=slot<=12
-                local bound=bindings[slot] and #bindings[slot]>0
-                local auxiliary=slot>=25
-                if (pass==1 and primary) or (pass==2 and not primary and bound)
-                    or (pass==3 and auxiliary and not bound)
-                    or (pass==4 and not primary and not auxiliary and not bound) then available[#available+1]=slot end
-            end
-        end
-    end
-    local cursor,skipped=1,protected
-    for _,list in ipairs({combat,utility}) do
-        for _,spell in ipairs(list) do
-            local identity=spell.baseID or spell.id
-            if not placed[identity] then
-                local slot=available[cursor]
-                if slot then
-                    desired[slot]={kind="spell",id=spell.id}; placed[identity]=true; cursor=cursor+1
-                else skipped=skipped+1 end
-            end
-        end
-    end
-    return desired,skipped
-end
-
-function MM:LevelingReference()
-    if InCombatLockdown() then
-        if self.levelingReferenceSnapshot and self.levelingReferenceSnapshot.key==self.current.key then
-            return self.levelingReferenceSnapshot
-        end
-        local reference=self:Copy(self.current)
-        reference.actions,reference.bindings={},self.bindingSnapshot or {}
-        reference.leveling=true
-        return reference
-    end
-    local reference=self:Copy(self.current)
-    reference.actions=self:LevelingLayout(self:ReadActions())
-    reference.bindings=self:Copy(self:ReadBindings())
-    reference.name=self.current.name.." · prioridade de barras"
-    reference.leveling=true
-    self:EnrichActions(reference)
-    self.levelingReferenceSnapshot=reference
-    return reference
+local function functionFamily(mm,spell)
+    local p=spell.purpose or {}
+    if p.primary=="heal" or p.primary=="self_heal" or spell.role=="heal" then return "heal" end
+    if p.primary=="movement" or spell.role=="mobility" then return "movement" end
+    local profile=mm:GetFunctionProfile(spell)
+    if profile.damage=="primary" or spell.role=="damage" then return profile.area and "area_damage" or "damage" end
+    return p.primary or spell.role or "utility"
 end
 
 function MM:BuildCurrentPlan(reference,matches,known,actions)
-    if not self:IsLevelingMode() then return self:BuildPlan(reference,matches,known,actions) end
-    local desired,skipped=self:LevelingLayout(actions)
-    local plan={}
+    local plan,skipped=self:BuildPlan(reference,matches,known,actions)
+    local leveling=self:IsLevelingMode()
+    local automatic=self:AutoAuthorized()
+    if not leveling and not automatic then return plan,skipped end
+    local settings=self:Settings()
+    local _,_,overrides=self:Context()
+    local layout=self:Copy(actions)
+    local plannedSlots,represented,canonical={},{},{}
+    for _,change in ipairs(plan) do
+        layout[change.slot]=change.after or {kind="spell",id=change.id}
+        plannedSlots[change.slot]=true
+    end
+    local function identity(spell) return spell.baseID or spell.id end
+    local function eligible(spell)
+        return spell and spell.learned and not spell.isPassive and not spell.offSpec
+            and not spell.action and spell.mountID==nil
+            and not spell.isAssistant and self:IsActivePurpose(spell)
+    end
+    -- The reference may deliberately repeat a skill. Keep every such position,
+    -- including already-correct slots which BuildPlan does not emit.
     for slot=1,self.MAX_SLOT do
-        if self:IsManagedSlot(slot) then
-            local action=desired[slot]
-            if action and not self:ActionMatches(actions[slot],action) then
-                local id=self:ActionKey(action)
-                plan[#plan+1]={slot=slot,id=id,after=action,before=actions[slot] or false,sourceID=id}
-            elseif not action and actions[slot] and actions[slot].kind=="spell" then
-                local spell=self:FindProfileSpell(self.current.spells,actions[slot].id)
-                if (self:Settings().levelingOwned or {})[slot] or spell and rotationRoles[spell.role] then
-                    plan[#plan+1]={slot=slot,after=false,before=actions[slot],clearing=true}
-                end
+        local source=reference.actions[slot]
+        local sourceID=source and self:ActionKey(source)
+        local match=sourceID and matches[sourceID]
+        local spell=match and match.id and known[match.id]
+        if self:IsManagedSlot(slot) and eligible(spell)
+            and self:ActionMatches(layout[slot],{kind="spell",id=spell.id}) then
+            local id=identity(spell)
+            canonical[id]=canonical[id] or {}
+            canonical[id][slot]=true
+        end
+    end
+    -- Blizzard may have filled an arbitrary empty button after learning a skill.
+    -- In automatic leveling, those copies must not decide its permanent position.
+    if automatic and leveling then
+        for slot,action in pairs(layout) do
+            local spell=action.kind=="spell" and self:FindProfileSpell(known,action.id)
+            local id=spell and identity(spell)
+            if eligible(spell) and not plannedSlots[slot] and not (canonical[id] and canonical[id][slot]) then
+                layout[slot]=nil
             end
         end
     end
-    return plan,skipped
+    for _,action in pairs(layout) do
+        if action.kind=="spell" then
+            local spell=self:FindProfileSpell(known,action.id)
+            if spell then represented[identity(spell)]=true end
+        end
+    end
+    settings.levelingExtraSlots=settings.levelingExtraSlots or {}
+    local key=(settings.sourceKey or "none")..":"..self.current.spec
+    settings.levelingExtraSlots[key]=settings.levelingExtraSlots[key] or {}
+    local saved=settings.levelingExtraSlots[key]
+    local reserved={}
+    for _,spell in pairs(known) do
+        local id=identity(spell)
+        local slot=saved[id]
+        if eligible(spell) and not represented[id] and slot and self:IsManagedSlot(slot)
+            and not reference.actions[slot] and not layout[slot] and not plannedSlots[slot] then
+            reserved[slot]=id
+        end
+    end
+    local remaining={}
+    for _,spell in pairs(known) do
+        if leveling and eligible(spell) and not represented[identity(spell)] then
+            remaining[#remaining+1]=spell
+        end
+    end
+    table.sort(remaining,function(a,b) return a.id<b.id end)
+    local missing={}
+    for _,spell in ipairs(remaining) do
+        local id=identity(spell)
+        if not represented[id] then
+            local family=functionFamily(self,spell)
+            local bestSlot,bestScore,nearSlot
+            for slot=1,self.MAX_SLOT do
+                local source=reference.actions[slot]
+                if self:IsManagedSlot(slot) and source then
+                    local sourceID=self:ActionKey(source)
+                    local sourceSpell=sourceID and reference.spells[sourceID]
+                    local match=sourceID and matches[sourceID]
+                    if sourceSpell and not sourceSpell.action and functionFamily(self,sourceSpell)==family then
+                        nearSlot=nearSlot or slot
+                        -- Approximate placement is separate from an equivalence:
+                        -- never replace an established match or a manual choice.
+                        if not layout[slot] and not plannedSlots[slot] and overrides[sourceID]==nil
+                            and not (match and match.id) then
+                            local score=self:Score(sourceSpell,spell,reference.spec,self.current.spec,reference.class,self.current.class)
+                            if not bestScore or score>bestScore then bestSlot,bestScore=slot,score end
+                        end
+                    end
+                end
+            end
+            local function auxiliaryAvailable(slot)
+                return slot and self:IsManagedSlot(slot) and not reference.actions[slot]
+                    and not layout[slot] and not plannedSlots[slot]
+                    and (not reserved[slot] or reserved[slot]==id)
+            end
+            local slot=bestSlot
+            if not slot and auxiliaryAvailable(saved[id]) then slot=saved[id] end
+            -- If the main has no vacant slot for this function, reserve a stable
+            -- supplementary position nearest the main's related function group.
+            if not slot then
+                local anchor=nearSlot or 49
+                for distance=0,self.MAX_SLOT do
+                    if auxiliaryAvailable(anchor+distance) then slot=anchor+distance; break end
+                    if auxiliaryAvailable(anchor-distance) then slot=anchor-distance; break end
+                end
+            end
+            if slot then
+                local after={kind="spell",id=spell.id}
+                if not self:ActionMatches(actions[slot],after) then
+                    plan[#plan+1]={slot=slot,id=spell.id,after=after,before=actions[slot] or false,supplemental=true,
+                        placementReason=bestSlot and "Posição por função geral; não é equivalência direta"
+                            or "Posição complementar estável, próxima da função do main"}
+                    plannedSlots[slot]=true
+                end
+                layout[slot],represented[id]=after,true
+                canonical[id]={[slot]=true}
+                saved[id]=slot
+            else missing[#missing+1]=spell.name or tostring(spell.id) end
+        end
+    end
+    self.levelingUnplaced=missing
+    if automatic then
+        -- Place the destination first; cleanup comes last and shares the undo
+        -- journal. A failed placement stops Apply before removing any copies.
+        for slot=1,self.MAX_SLOT do
+            local action=actions[slot]
+            local spell=action and action.kind=="spell" and self:FindProfileSpell(known,action.id)
+            local id=spell and identity(spell)
+            if self:IsManagedSlot(slot) and canonical[id] and not canonical[id][slot] and not plannedSlots[slot] then
+                plan[#plan+1]={slot=slot,before=self:Copy(action),after=false,clearing=true,
+                    placementReason="Cópia extra; habilidade mantida na posição da referência/complementar"}
+            end
+        end
+    end
+    return plan,skipped+#missing
 end
 
 function MM:RecordLevelingLayout()
-    if not self:IsLevelingMode() then return end
-    local owned={}
-    local combat,utility=self:LevelingSpells()
-    local eligible={}
-    for _,list in ipairs({combat,utility}) do for _,spell in ipairs(list) do eligible[spell.id]=true end end
-    for slot,action in pairs(self:ReadActions()) do
-        if action.kind=="spell" and eligible[action.id] then owned[slot]=action.id end
-    end
-    self:Settings().levelingOwned=owned
     self:InvalidateContext()
-end
-
-function MM:MoveLevelingPriority(id,offset)
-    local list=self:LevelingSpells()
-    local index
-    for i,spell in ipairs(list) do if spell.id==id then index=i end end
-    if not index then return end
-    local other=math.max(1,math.min(#list,index+offset))
-    list[index],list[other]=list[other],list[index]
-    local priorities=self:Settings().levelingPriority or {}
-    self:Settings().levelingPriority=priorities
-    for i,spell in ipairs(list) do priorities[spell.baseID or spell.id]=i end
-    self:InvalidateContext(); self:RefreshUI()
-    if self:Settings().auto then self:QueueAuto() end
 end
 
 function MM:AutoAuthorized()

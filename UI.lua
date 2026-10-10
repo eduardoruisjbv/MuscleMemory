@@ -78,7 +78,17 @@ local function scroll(parent,x,y,width,height)
     return frame,child
 end
 
+local function availabilityText(spell)
+    if spell.offSpec then return "Outra especialização" end
+    if spell.learned==false then
+        if spell.talent then return "Talento não selecionado" end
+        return spell.levelLearned and spell.levelLearned>0 and ("Não aprendida · nível "..spell.levelLearned) or "Não aprendida"
+    end
+    return spell.isPassive and "Passiva" or nil
+end
+
 local function roleLabel(spell)
+    if spell.isPassive then return "Passiva" end
     if MM.RoleLabel then return MM:RoleLabel(spell) end
     return MM.roles[spell.role] or "Unclassified"
 end
@@ -259,6 +269,8 @@ local function tooltip(value)
         else GameTooltip:SetSpellByID(value.spell.id) end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine(roleLabel(value.spell),0.29,0.82,0.75)
+        local availability=availabilityText(value.spell)
+        if availability then GameTooltip:AddLine(availability,0.66,0.68,0.67,true) end
         if MM.FunctionDetails then
             for _,detail in ipairs(MM:FunctionDetails(value.spell) or {}) do
                 GameTooltip:AddLine(detail,0.66,0.68,0.67,true)
@@ -475,14 +487,19 @@ function MM:FillPalette(container,spells,side,search)
         value:SetPoint("TOPLEFT",0,-(index-1)*PALETTE_HEIGHT)
         value.icon.spell=spell
         value.icon.texture:SetTexture(spell.icon or QUESTION)
+        value.icon.texture:SetDesaturated(spell.learned==false)
+        value.icon.texture:SetAlpha(spell.learned==false and 0.55 or 1)
+        value.name:SetTextColor(unpack(spell.learned==false and colors.muted or colors.text))
         value.name:SetText(spell.name or "#"..spell.id)
-        value.role:SetText(roleLabel(spell))
+        value.role:SetText(roleLabel(spell)..(availabilityText(spell) and " · "..availabilityText(spell) or ""))
         local slots=side == "source" and self.ui.grouped[spell.id] or self.ui.targetSlots[spell.id]
         value.binding:SetText(side == "source" and bindings(slots,reference)
             or self.ui.isCurrentTarget and ("Current: "..bindings(slots)) or "Select to map")
         value.icon.note=(side == "source" and "Captured keybinding: "..bindings(slots,reference)
             or "Click to map to the selected source; drag to create a mapping.")
             ..(slots and "\n"..technicalSlots(slots) or "")
+            ..(spell.talent and (spell.talentSelected and "\nTalento da configuração ativa." or "\nOpção da árvore de talentos; não selecionada na configuração ativa.") or "")
+            ..(spell.flyout and "\nHabilidade descoberta dentro de um flyout do grimório." or "")
         value:Show()
     end
     for index=#list+1,#container.buttons do container.buttons[index]:Hide() end
@@ -616,6 +633,7 @@ function MM:SetEditing(editing)
 end
 
 local function statusFor(match,target)
+    if target and target.learned==false then return "future" end
     if match and match.status then return match.status end
     if target then return "matched" end
     if match and match.blocked then return "excluded" end
@@ -693,6 +711,7 @@ function MM:ShowPreview(preserveScroll)
         row.details="Current keybinding: "..bindings({entry.slot}).."\n"..technicalSlots({entry.slot})
             ..(entry.sourceBinding and "\nKeybinding captured on main: "..entry.sourceBinding or "")
             ..(entry.bindingWarning and "\n"..entry.bindingWarning or "")
+            ..(entry.placementReason and "\n"..entry.placementReason or "")
         row:Show()
     end
     for index=#plan+1,#overlay.rows do overlay.rows[index]:Hide() end
@@ -715,7 +734,7 @@ function MM:RefreshUI()
     ui.reference=reference
     ui.isCurrentTarget=settings.targetClass == self.current.class and settings.targetSpec == self.current.spec
     local origin=self.db.references[settings.sourceKey] or self.db.characters[settings.sourceKey]
-    local shownReference=self:IsLevelingMode() and origin or reference
+    local shownReference=reference
     local sourceClass=shownReference and shownReference.class or settings.sourceClass or self.current.class
     ui.sourceClass:SetText(self:Class(sourceClass).name.."  v")
     ui.sourceProfile:SetText(shownReference and (shownReference.name.." / "..shownReference.specName) or "Select your main  v")
@@ -772,12 +791,13 @@ function MM:RefreshUI()
     local rowIndex=0
     for _,id in ipairs(order) do
         local spell=placed[id]
-        local match=matches[id]
+        local activeMatch=matches[id]
+        local match=activeMatch and (activeMatch.future or activeMatch)
         local target=match and match.id and targets[match.id]
         local status=statusFor(match,target)
-        local problem=status == "not_configured" or status == "unavailable" or (match and match.warning)
+        local problem=status == "future" or status == "not_configured" or status == "unavailable" or (match and match.warning)
         local unresolved=problem or status == "no_direct_equivalent"
-        if target then translated=translated+1 end
+        if target and target.learned~=false then translated=translated+1 end
         if problem then pending=pending+1 end
         if status == "no_direct_equivalent" then noDirect=noDirect+1 end
         if match and match.manual then manual=manual+1 end
@@ -803,12 +823,22 @@ function MM:RefreshUI()
             row.targetName:SetText(target and target.name or caption)
             row.target.emptyTitle=caption
             local statusLabel,color=stateText(match,status)
+            if status=="future" then
+                statusLabel=availabilityText(target).." · sugestão futura"
+                local active=activeMatch and activeMatch.id and targets[activeMatch.id]
+                if active and active.learned~=false then statusLabel=statusLabel.." · agora: "..(active.name or tostring(active.id)) end
+            end
             row.reason:SetText(statusLabel)
             row.reason:SetTextColor(unpack(color))
             row.targetName:SetTextColor(unpack(target and colors.text or (unresolved and colors.amber or colors.muted)))
             row.details=roleLabel(spell).."\nCaptured keybinding: "..key.."\n"..technicalSlots(grouped[id])
                 .."\n"..(match and match.reason or statusLabel)
                 ..(match and match.warning and "\n"..match.warning or "")
+            if spell.talent then
+                row.details=row.details..(spell.talentSelected and "\nTalento selecionado na configuração ativa."
+                    or "\nOpção de talento não selecionada na configuração ativa.")
+            end
+            if spell.flyout then row.details=row.details.."\nHabilidade encontrada dentro de um flyout do grimório." end
             if self.FunctionDetails then
                 local details=self:FunctionDetails(spell) or {}
                 if #details>0 then row.details=row.details.."\n"..table.concat(details,"\n") end
@@ -867,7 +897,6 @@ function MM:AutoModeMenu(anchor)
         {text="Restore default priorities",disabled=not self:IsLevelingMode(),action=function()
             self:Settings().levelingPriority={}
             self:InvalidateContext(); self:RefreshUI()
-            if self:Settings().auto then self:QueueAuto() end
         end},
     })
 end
@@ -917,14 +946,19 @@ function MM:ShowAutoConsent()
             if InCombatLockdown() then return self:Print("Leave combat to authorize.") end
             local settings=self:Settings()
             if dialog.key~=self.current.key or dialog.mode~=(settings.autoMode or "equivalence")
-                or dialog.sourceKey~=settings.sourceKey or settings.targetClass~=self.current.class or settings.targetSpec~=self.current.spec then
+                or dialog.sourceKey~=settings.sourceKey or dialog.translator~=settings.translator or settings.targetClass~=self.current.class or settings.targetSpec~=self.current.spec then
                 dialog:Hide(); self:RefreshUI()
                 return self:Print("The character or mode changed. Open authorization again.")
             end
             settings.autoConsent=self.AUTO_CONSENT_VERSION
             settings.autoConsentMode=dialog.mode
             settings.auto=true
-            if dialog.mode=="leveling" then self.db.levelingAuto[(self:Identity())]=self.AUTO_CONSENT_VERSION end
+            if dialog.mode=="leveling" then
+                local guid=self:Identity()
+                self.db.levelingAuto[guid]=self.AUTO_CONSENT_VERSION
+                self.db.levelingContext=self.db.levelingContext or {}
+                self.db.levelingContext[guid]={sourceKey=settings.sourceKey,translator=settings.translator}
+            end
             -- Start a fresh restoration baseline for this consent session.
             local undo=self.db.undo[self.current.key]
             if undo then undo.automatic=false end
@@ -937,6 +971,7 @@ function MM:ShowAutoConsent()
     end
     local settings=self:Settings()
     dialog.key,dialog.mode,dialog.sourceKey=self.current.key,settings.autoMode or "equivalence",settings.sourceKey
+    dialog.translator=settings.translator
     dialog.description:SetText(self:IsLevelingMode()
         and "I authorize MuscleMemory to rearrange this character’s abilities on login, level-up, learning abilities, changing talents, or switching specialization.\n\nAbilities may move to different keybindings based on bar priority. New abilities are placed automatically. Right-click to adjust priority or pin a position. Available mounts follow the exact source selection.\n\nChanges are made out of combat. Macros, items, and existing utility positions are preserved. Restore bars disables automation for every specialization and restores the state from the start of this authorization for the current specialization."
         or "I authorize MuscleMemory to apply mappings from the selected source automatically for this character and specialization on login or ability/talent changes.\n\nButtons may be replaced with abilities available to the destination. Mounts preserve the exact source selection; actions without an available equivalent remain pending.\n\nChanges are made out of combat. Keybindings are not modified. Restore bars disables automation and restores the state from the start of this authorization.")
@@ -1064,7 +1099,7 @@ function MM:CreateUI()
     ui.autoMode=button(ui,"",620,-658,398,function(anchor) self:AutoModeMenu(anchor) end)
     ui.editHint=label(ui,"Right-click a destination to restore the suggestion or exclude it.",22,-698,990)
     ui.editHint:SetTextColor(unpack(colors.muted))
-    ui.applyReason=label(ui,"",22,-716,520,"GameFontHighlight")
+    ui.applyReason=label(ui,"",22,-716,375,"GameFontHighlight")
     ui.applyReason:SetMaxLines(2)
     ui.applyReason:SetSpacing(3)
     ui.previewButton=button(ui,"Preview",564,-714,112,function() self:ShowPreview() end)
