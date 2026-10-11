@@ -806,6 +806,7 @@ events:SetScript("OnEvent",function(_,event,arg)
         MM.db.collection = MM.db.collection or {characters={}}
         MM.db.collection.characters = MM.db.collection.characters or {}
         MM.db.schema=3
+        if MM.RegisterOptionsCategory then MM:RegisterOptionsCategory() end
         for _,settings in pairs(MM.db.settings) do
             if settings.autoConsent~=MM.AUTO_CONSENT_VERSION then settings.auto=false end
         end
@@ -870,6 +871,7 @@ SLASH_MUSCLEMEMORY2="/musclememory"
 SlashCmdList.MUSCLEMEMORY=function(message)
     message=message:lower():match("^%s*(.-)%s*$")
     if message == "capture" then MM:Capture()
+    elseif message == "editor" then MM:ToggleUI()
     elseif message == "apply" then MM:Apply()
     elseif message == "undo" then MM:Undo()
     elseif message == "clear" or message == "limpar" then MM:ClearBars()
@@ -879,5 +881,5 @@ SlashCmdList.MUSCLEMEMORY=function(message)
     elseif message == "collect status" then MM:PrintCollectionStatus()
     elseif message == "collect clear" then MM:ClearCollection()
     elseif message == "export" or message == "collect export" then MM:ShowCollectionExport()
-    else MM:ToggleUI() end
+    else MM:OpenOptions() end
 end

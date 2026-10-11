@@ -1,8 +1,9 @@
 local _, MM = ...
 local colors = {
-    bg={0.055,0.06,0.065,0.98}, panel={0.09,0.10,0.11,1}, row={0.115,0.125,0.135,1},
-    text={0.93,0.90,0.83,1}, muted={0.66,0.68,0.67,1}, teal={0.29,0.82,0.75,1},
-    amber={0.94,0.69,0.35,1}, border={0.27,0.28,0.27,1}, selected={0.12,0.22,0.22,1},
+    -- Warm, dark surfaces and gold hierarchy match Mythic View's Blizzard Settings pages.
+    bg={0.045,0.040,0.032,0.94}, panel={0.075,0.066,0.052,0.95}, row={0.105,0.092,0.070,0.96},
+    text={0.95,0.90,0.78,1}, muted={0.70,0.65,0.53,1}, teal={1.00,0.80,0.20,1},
+    amber={0.96,0.62,0.28,1}, border={0.35,0.27,0.14,0.92}, selected={0.19,0.145,0.060,0.98},
 }
 local QUESTION = 134400
 local WHITE = "Interface\\Buttons\\WHITE8X8"
@@ -287,7 +288,7 @@ local function icon(parent,size)
     local value=CreateFrame("Button",nil,parent,"BackdropTemplate")
     value:SetSize(size,size)
     value:SetBackdrop({bgFile=WHITE,edgeFile=WHITE,edgeSize=1})
-    value:SetBackdropColor(0.045,0.05,0.055,1)
+    value:SetBackdropColor(0.045,0.040,0.032,0.96)
     value:SetBackdropBorderColor(unpack(colors.border))
     value.texture=value:CreateTexture(nil,"ARTWORK")
     value.texture:SetPoint("TOPLEFT",3,-3)
@@ -1003,6 +1004,11 @@ function MM:CreateUI()
     animateOpening(ui)
     label(ui,"MuscleMemory",22,-22,nil,"GameFontNormalLarge"):SetTextColor(unpack(colors.text))
     label(ui,"Same purpose, on the key you already know.",22,-48,840,"GameFontHighlight"):SetTextColor(unpack(colors.muted))
+    local titleRule=ui:CreateTexture(nil,"ARTWORK")
+    titleRule:SetTexture(WHITE)
+    titleRule:SetVertexColor(0.52,0.39,0.16,0.82)
+    titleRule:SetPoint("TOPLEFT",22,-82)
+    titleRule:SetSize(996,1)
     ui.current=label(ui,"",22,-69,870)
     ui.current:SetTextColor(unpack(colors.muted))
     local close=CreateFrame("Button",nil,ui,"UIPanelCloseButton")
@@ -1126,4 +1132,50 @@ function MM:ToggleUI()
     if not self.current then return self:Print("Wait for the character to finish loading.") end
     if not self.ui then self:CreateUI() else self.ui:SetShown(not self.ui:IsShown()) end
     if self.ui:IsShown() then self:RefreshUI() end
+end
+
+function MM:OpenOptions()
+    if self.optionsCategory and Settings and Settings.OpenToCategory then
+        Settings.OpenToCategory(self.optionsCategory:GetID())
+    else
+        self:ToggleUI()
+    end
+end
+
+function MM:RegisterOptionsCategory()
+    if self.optionsCategory or not (Settings and Settings.RegisterCanvasLayoutCategory
+        and Settings.RegisterAddOnCategory) then return end
+
+    local page = CreateFrame("Frame")
+    local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 20, -24)
+    title:SetText("MuscleMemory")
+
+    local description = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    description:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -14)
+    description:SetWidth(620)
+    description:SetJustifyH("LEFT")
+    description:SetText("Keep abilities in familiar action-bar positions across characters. Capture your main character, review the suggested mappings, and apply them out of combat.")
+
+    local editorHint = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    editorHint:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -22)
+    editorHint:SetWidth(620)
+    editorHint:SetJustifyH("LEFT")
+    editorHint:SetText("The action-bar editor is a separate workspace so it can show source and destination bars side by side.")
+
+    local button = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
+    button:SetSize(190, 28)
+    button:SetPoint("TOPLEFT", editorHint, "BOTTOMLEFT", 0, -20)
+    button:SetText("Open action-bar editor")
+    button:SetScript("OnClick", function()
+        if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
+        MM:ToggleUI()
+    end)
+
+    page.OnCommit = function() end
+    page.OnDefault = function() end
+    page.OnRefresh = function() end
+    local category = Settings.RegisterCanvasLayoutCategory(page, "MuscleMemory")
+    Settings.RegisterAddOnCategory(category)
+    self.optionsCategory = category
 end
