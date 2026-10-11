@@ -418,6 +418,111 @@ function MM:CatalogEntry(id, class, spec)
     return result
 end
 
+-- Conservative public signal for addons that need to distinguish a cast's
+-- immediate hit from damage that only arrives on later periodic ticks. This
+-- table is intentionally private and is a small reviewed seed, not a complete
+-- spell database. Unknown IDs stay unknown rather than inheriting a guess from
+-- rotation role or tooltip wording.
+local impactProfiles = {
+    -- Pure periodic damage: the cast applies/refreshes an effect and does not
+    -- represent a separate direct strike for camera-impact purposes.
+    [1079] = {kind="periodic_only", confidence=0.96}, -- Rip
+    [1943] = {kind="periodic_only", confidence=0.86}, -- Rupture
+    [772] = {kind="periodic_only", confidence=0.82}, -- Rend
+    [172] = {kind="periodic_only", confidence=0.92}, -- Corruption
+    [980] = {kind="periodic_only", confidence=0.94}, -- Agony
+    [30108] = {kind="periodic_only", confidence=0.92}, -- Unstable Affliction
+
+    -- The cast includes an immediate strike as well as a periodic component.
+    [589] = {kind="mixed", confidence=0.86}, -- Shadow Word: Pain
+    [703] = {kind="mixed", confidence=0.84}, -- Garrote
+    [34914] = {kind="mixed", confidence=0.84}, -- Vampiric Touch
+    [1822] = {kind="mixed", confidence=0.90}, -- Rake
+    [8921] = {kind="mixed", confidence=0.90}, -- Moonfire
+    [93402] = {kind="mixed", confidence=0.90}, -- Sunfire
+    [188389] = {kind="mixed", confidence=0.90}, -- Flame Shock
+    [348] = {kind="mixed", confidence=0.88}, -- Immolate
+    [357208] = {kind="mixed", confidence=0.86}, -- Fire Breath
+    [259495] = {kind="mixed", confidence=0.82}, -- Wildfire Bomb
+
+    -- Living Flame changes purpose by specialization: Preservation heals.
+    [361469] = {kind="spec_variant", confidence=0.95},
+}
+
+local impactAPI = _G.MuscleMemoryAPI
+if type(impactAPI) ~= "table" then
+    impactAPI = {}
+    _G.MuscleMemoryAPI = impactAPI
+end
+
+-- Dot-call contract: kind, confidence, source, version. No mutable catalog or
+-- setter is exposed to consumers. Spell IDs are checked as public numeric IDs.
+impactAPI.GetImpactClassification = function(spellID)
+    local version = "1.0"
+    if type(spellID) ~= "number" or spellID < 1 or spellID % 1 ~= 0 then
+        return "unknown", 0, "invalid-id", version
+    end
+
+    -- Resolve through the same class/spec-aware path Muscle Memory uses for its
+    -- own curated catalog, including rotation profiles and purpose overlays.
+    if not UnitClass or not GetSpecialization or not GetSpecializationInfo
+        or not MM.CatalogEntry then
+        return "unknown", 0, "catalog-context-unavailable", version
+    end
+    local _, classToken = UnitClass("player")
+    local specIndex = GetSpecialization()
+    local specID = specIndex and GetSpecializationInfo(specIndex)
+    if not classToken or not specID then
+        return "unknown", 0, "catalog-context-unavailable", version
+    end
+    local entry = MM:CatalogEntry(spellID, classToken, specID)
+    if not entry or entry.curated ~= true then
+        return "unknown", 0, "not-in-active-curated-catalog", version
+    end
+    local purpose = entry.purpose
+    if purpose and purpose.reviewed == false then
+        return "unknown", 0, "purpose-not-reviewed", version
+    end
+
+    local profile = impactProfiles[spellID]
+
+    -- Role "dot" is useful corroboration from the active specialization, but
+    -- it does not by itself prove whether applying the effect also strikes.
+    -- That distinction only comes from the explicit reviewed seed above.
+    if entry.role == "dot" and not profile then
+        return "unknown", 0, "impact-kind-unclear", version
+    end
+
+    if not profile then
+        -- Muscle Memory's own functional model is the only fallback evidence:
+        -- direct damage is inferred only for curated, non-DoT damage entries.
+        -- Utility, unknown and other non-damaging functions stay unknown.
+        if not entry.role or entry.role == "unknown" or entry.role == "utility" then
+            return "unknown", 0, "not-damage-role", version
+        end
+        if MM.GetFunctionProfile then
+            local functions = MM:GetFunctionProfile(entry)
+            if functions and functions.damage == "primary" then
+                return "direct", 0.72, "catalog-function-profile", version
+            end
+        end
+        return "unknown", 0, "not-primary-damage", version
+    end
+
+    if profile.kind == "spec_variant" then
+        if entry.role == "heal" or purpose and purpose.primary == "heal" then
+            return "non_damage", profile.confidence, "purpose-catalog-spec", version
+        elseif entry.role == "builder" or entry.role == "core" then
+            return "direct", profile.confidence, "purpose-catalog-spec", version
+        end
+        return "unknown", 0, "spec-unavailable", version
+    end
+
+    local source = purpose and purpose.reviewed == true
+        and "catalog-purpose-impact" or "catalog-dot-impact"
+    return profile.kind, profile.confidence, source, version
+end
+
 function MM:RefreshClassification(spell,class,spec)
     spell.class,spell.functions=class,nil
     if spell.isAssistant then spell.role,spell.curated="assisted",true; return spell end
