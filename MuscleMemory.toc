@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120105, 120100
 ## Title: MuscleMemory
 ## Notes: Keep abilities in the same action-bar slots across characters.
 ## Author: Eduardo Rui
