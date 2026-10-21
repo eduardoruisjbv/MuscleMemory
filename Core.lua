@@ -155,6 +155,13 @@ function MM:GetBindingForSlot(slot,reference)
     return #labels>0 and table.concat(labels," / ") or "No keybinding",keys
 end
 
+-- Spellbook rows may report an override ID; the base ID is the learned identity.
+local function isLearned(id,baseID,offSpec)
+    if offSpec then return false end
+    return C_SpellBook.IsSpellKnown(id,bank)==true
+        or baseID~=nil and C_SpellBook.IsSpellKnown(baseID,bank)==true
+end
+
 function MM:RefreshLearnedState()
     if InCombatLockdown() then self.scanPending=true; return end
     local guid,_,_,spec=self:Identity()
@@ -165,8 +172,7 @@ function MM:RefreshLearnedState()
     self.scanPending=nil
     local changed=false
     for _,spell in pairs(self.current.spells) do
-        local learned=not spell.offSpec and (C_SpellBook.IsSpellKnown(spell.id,bank)==true
-            or spell.baseID and C_SpellBook.IsSpellKnown(spell.baseID,bank)==true) or false
+        local learned=isLearned(spell.id,spell.baseID,spell.offSpec)
         if spell.learned~=learned then
             spell.learned=learned
             spell.functions=nil
@@ -185,6 +191,7 @@ function MM:RefreshLearnedState()
         self.current.updated=time()
         local observed=self.db.characters[self.current.key]
         if observed then observed.spells=self:Copy(self.current.spells); observed.updated=self.current.updated end
+        if self.StoreCollectionSnapshot then self:StoreCollectionSnapshot() end
         self:InvalidateContext()
         if self.RefreshUI then self:RefreshUI() end
     end
@@ -291,7 +298,7 @@ function MM:Scan(force)
                     entry.class=class
                     entry.offSpec=item.isOffSpec or skill.offSpecID~=nil
                     entry.isPassive=item.isPassive
-                    entry.learned=not entry.offSpec and C_SpellBook.IsSpellKnown(id,bank)==true or false
+                    entry.learned=isLearned(id,item.actionID,entry.offSpec)
                     entry.levelLearned=C_SpellBook.GetSpellBookItemLevelLearned(slot,bank)
                     entry.baseID = item.actionID
                     entry.name, entry.icon = item.name, item.iconID
@@ -468,15 +475,16 @@ function MM:Context()
     local targets, label = self:TargetSpells(settings.targetClass,settings.targetSpec)
     targets=self:UtilityTargets(reference,targets)
     local overrides = self.db.overrides[key]
-    local available,planned={},{}
+    local available,planned,hasFuture={},{},false
     for id,spell in pairs(targets) do
         if not spell.isPassive and not spell.offSpec then
             planned[id]=spell
-            if spell.learned~=false then available[id]=spell end
+            if spell.learned~=false then available[id]=spell else hasFuture=true end
         end
     end
     local matches = reference and self:Suggest(reference,available,overrides,settings.targetSpec,settings.targetClass) or {}
-    if reference then
+    -- The second pass only differs when some planned ability is not learned yet.
+    if reference and hasFuture then
         local future=self:Suggest(reference,planned,overrides,settings.targetSpec,settings.targetClass)
         for id,match in pairs(matches) do
             local suggestion=future[id]
@@ -561,30 +569,37 @@ function MM:GetPreview()
 end
 
 function MM:GetClearBarsState()
-    if InCombatLockdown() then return false,"Saia do combate para limpar as barras." end
-    if GetCursorInfo() then return false,"Solte o que está no cursor antes de limpar." end
+    if InCombatLockdown() then return false,"Leave combat to clear the bars." end
+    if GetCursorInfo() then return false,"Drop what is on the cursor before clearing." end
     if UnitInVehicle("player") or (HasOverrideActionBar and HasOverrideActionBar())
         or (HasVehicleActionBar and HasVehicleActionBar()) or (HasPossessBar and HasPossessBar()) then
-        return false,"Saia do veículo ou da barra temporária antes de limpar."
+        return false,"Leave the vehicle or temporary bar before clearing."
     end
     for slot=1,self.MAX_SLOT do
         if self:IsManagedSlot(slot) and GetActionInfo(slot) then
-            return true,"Esvazia as barras normais, incluindo macros, itens e montarias. Mantém as teclas e a referência salva; pausa o automático. Restaurar barras desfaz."
+            return true,"Empties the normal bars, including macros, items and mounts. Keeps key bindings and the saved reference; pauses automatic mode. Restore bars undoes it."
         end
     end
-    return false,"As barras normais já estão vazias."
+    return false,"The normal bars are already empty."
 end
 
 function MM:ClearBars()
     local allowed,reason=self:GetClearBarsState()
     if not allowed then return self:Print(reason) end
     self:Scan()
+    if not self.current then return self:Print("The spellbook has not loaded yet. Try again.") end
     local actions=self:ReadActions()
-    local undo={key=self.current.key,changes={},created=time(),clearPending=true}
+    -- An interrupted cleanup leaves a pending journal; keep its slots so Restore
+    -- still recovers positions removed by the earlier attempt.
+    local previous=self.db.undo[self.current.key]
+    local undo=previous and previous.clearPending and previous
+        or {key=self.current.key,changes={},created=time(),clearPending=true}
+    local journaled={}
+    for _,change in ipairs(undo.changes) do journaled[change.slot]=true end
     -- Journal the complete snapshot before touching the first slot. A later
     -- Apply merges into this journal, so Restore returns to before the cleanup.
     for slot=1,self.MAX_SLOT do
-        if self:IsManagedSlot(slot) and actions[slot] then
+        if self:IsManagedSlot(slot) and actions[slot] and not journaled[slot] then
             undo.changes[#undo.changes+1]={slot=slot,before=self:Copy(actions[slot]),after=false,clearing=true}
         end
     end
@@ -594,17 +609,20 @@ function MM:ClearBars()
     self.applying=true
     local cleared=0
     for _,change in ipairs(undo.changes) do
-        local ok,success,errorMessage=pcall(self.PutAction,self,change.slot,nil)
-        if not ok or not success then
-            ClearCursor()
-            self:Print("Limpeza interrompida: "..tostring(ok and errorMessage or success)..". Restaurar barras recupera as posições removidas.")
-            break
+        -- Slots already emptied by an earlier, interrupted cleanup are skipped.
+        if GetActionInfo(change.slot) then
+            local ok,success,errorMessage=pcall(self.PutAction,self,change.slot,nil)
+            if not ok or not success then
+                ClearCursor()
+                self:Print("Clearing stopped: "..tostring(ok and errorMessage or success)..". Restore bars brings back the removed positions.")
+                break
+            end
+            cleared=cleared+1
         end
-        cleared=cleared+1
     end
     self.applying=nil
     self:InvalidateContext()
-    self:Print(cleared.." posições limpas. Use Aplicar sugestões para preencher; Restaurar barras desfaz. Automático pausado.")
+    self:Print(cleared.." positions cleared. Use Apply suggestions to fill them; Restore bars undoes it. Automatic mode paused.")
     self:RefreshUI()
 end
 
@@ -680,6 +698,10 @@ function MM:Apply(automatic)
         return self:Print("Wait until you leave the vehicle or temporary action bar.")
     end
     self:Scan()
+    if not self.current then
+        if automatic then self.autoPending=true else self:Print("The spellbook has not loaded yet. Try again.") end
+        return
+    end
     local settings = self:Settings()
     if settings.targetClass ~= self.current.class or settings.targetSpec ~= self.current.spec then
         if not automatic then self:Print("Log in to the destination character and specialization to apply.") end
@@ -736,7 +758,7 @@ function MM:Apply(automatic)
     end
     self.applying=nil
     if self:IsLevelingMode() and self.levelingUnplaced and #self.levelingUnplaced>0 then
-        self:Print("Aprendidas ainda sem espaço nas barras: "..table.concat(self.levelingUnplaced,", "))
+        self:Print("Learned but not yet placed on the bars: "..table.concat(self.levelingUnplaced,", "))
     end
     self:RecordLevelingLayout()
     self:Print(applied.." slots applied. Pending / protected: "..skipped..". /mm undo will undo this.")
@@ -826,6 +848,12 @@ events:SetScript("OnEvent",function(_,event,arg)
         MM:Print("/mm opens the editor. Start by capturing your main’s action bars.")
     elseif event == "PLAYER_LOGOUT" then
         if not InCombatLockdown() then MM:Scan(); MM:SaveVisitedBars() end
+    elseif MM.db and not MM.current then
+        -- The first scan found an empty spellbook; retry once it loads.
+        if (event == "SPELLS_CHANGED" or event == "PLAYER_REGEN_ENABLED") and MM.scanPending then
+            MM:Scan()
+            if MM.current then MM:QueueAuto() end
+        end
     elseif MM.db and MM.current then
         if event == "UPDATE_BINDINGS" or event == "ACTIONBAR_PAGE_CHANGED" then
             if InCombatLockdown() then MM.bindingsPending=true else MM:ReadBindings() end

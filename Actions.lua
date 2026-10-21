@@ -153,10 +153,10 @@ function MM:PutAction(slot,action)
             end
             if found then break end
         end
-        if not found then return false,"O menu de habilidades não está disponível no grimório atual." end
+        if not found then return false,"The ability menu is not available in the current spellbook." end
         C_SpellBook.PickupSpellBookItem(found,bank)
         local kind,id=GetCursorInfo()
-        if kind~="flyout" or id~=action.id then ClearCursor(); return false,"Não foi possível recuperar o menu de habilidades." end
+        if kind~="flyout" or id~=action.id then ClearCursor(); return false,"Could not pick up the ability menu." end
     elseif action.kind=="macro" then
         local id=self:FindExactMacro(action)
         if not id then return false,"The exact macro is unavailable on this character." end

@@ -80,10 +80,10 @@ local function scroll(parent,x,y,width,height)
 end
 
 local function availabilityText(spell)
-    if spell.offSpec then return "Outra especialização" end
+    if spell.offSpec then return "Other specialization" end
     if spell.learned==false then
-        if spell.talent then return "Talento não selecionado" end
-        return spell.levelLearned and spell.levelLearned>0 and ("Não aprendida · nível "..spell.levelLearned) or "Não aprendida"
+        if spell.talent then return "Talent not selected" end
+        return spell.levelLearned and spell.levelLearned>0 and ("Not learned · level "..spell.levelLearned) or "Not learned"
     end
     return spell.isPassive and "Passiva" or nil
 end
@@ -499,8 +499,8 @@ function MM:FillPalette(container,spells,side,search)
         value.icon.note=(side == "source" and "Captured keybinding: "..bindings(slots,reference)
             or "Click to map to the selected source; drag to create a mapping.")
             ..(slots and "\n"..technicalSlots(slots) or "")
-            ..(spell.talent and (spell.talentSelected and "\nTalento da configuração ativa." or "\nOpção da árvore de talentos; não selecionada na configuração ativa.") or "")
-            ..(spell.flyout and "\nHabilidade descoberta dentro de um flyout do grimório." or "")
+            ..(spell.talent and (spell.talentSelected and "\nTalent in the active loadout." or "\nTalent tree option; not selected in the active loadout.") or "")
+            ..(spell.flyout and "\nAbility found inside a spellbook flyout." or "")
         value:Show()
     end
     for index=#list+1,#container.buttons do container.buttons[index]:Hide() end
@@ -825,7 +825,7 @@ function MM:RefreshUI()
             row.target.emptyTitle=caption
             local statusLabel,color=stateText(match,status)
             if status=="future" then
-                statusLabel=availabilityText(target).." · sugestão futura"
+                statusLabel=availabilityText(target).." · future suggestion"
                 local active=activeMatch and activeMatch.id and targets[activeMatch.id]
                 if active and active.learned~=false then statusLabel=statusLabel.." · agora: "..(active.name or tostring(active.id)) end
             end
@@ -836,10 +836,10 @@ function MM:RefreshUI()
                 .."\n"..(match and match.reason or statusLabel)
                 ..(match and match.warning and "\n"..match.warning or "")
             if spell.talent then
-                row.details=row.details..(spell.talentSelected and "\nTalento selecionado na configuração ativa."
-                    or "\nOpção de talento não selecionada na configuração ativa.")
+                row.details=row.details..(spell.talentSelected and "\nTalent selected in the active loadout."
+                    or "\nTalent option not selected in the active loadout.")
             end
-            if spell.flyout then row.details=row.details.."\nHabilidade encontrada dentro de um flyout do grimório." end
+            if spell.flyout then row.details=row.details.."\nAbility found inside a spellbook flyout." end
             if self.FunctionDetails then
                 local details=self:FunctionDetails(spell) or {}
                 if #details>0 then row.details=row.details.."\n"..table.concat(details,"\n") end
@@ -897,10 +897,6 @@ function MM:AutoModeMenu(anchor)
     self:Menu(anchor,{
         {text="Character mappings",action=function() select("equivalence") end},
         {text="Leveling: organize by priority",action=function() select("leveling") end},
-        {text="Restore default priorities",disabled=not self:IsLevelingMode(),action=function()
-            self:Settings().levelingPriority={}
-            self:InvalidateContext(); self:RefreshUI()
-        end},
     })
 end
 
@@ -908,25 +904,13 @@ function MM:LevelingMenu(anchor,spell)
     if not spell or spell.action or spell.role=="mount" or InCombatLockdown() then return end
     local settings=self:Settings()
     local id=spell.baseID or spell.id
-    settings.levelingPins=settings.levelingPins or {}
     settings.levelingExcluded=settings.levelingExcluded or {}
-    local pins,excluded=settings.levelingPins,settings.levelingExcluded
-    local canPrioritize=self:IsCombatLayoutSpell(spell)
-    local positions={}
-    for slot,action in pairs(self:ReadActions()) do
-        if self:ActionMatches(action,{kind="spell",id=spell.id}) then positions[#positions+1]=slot end
-    end
-    table.sort(positions)
+    local excluded=settings.levelingExcluded
     local function refresh()
         self:InvalidateContext(); self:RefreshUI()
         if settings.auto then self:QueueAuto() end
     end
     self:Menu(anchor,{
-        {text="Raise bar priority",disabled=not canPrioritize,reason="Existing utility actions keep their positions.",action=function() self:MoveLevelingPriority(spell.id,-1) end},
-        {text="Lower bar priority",disabled=not canPrioritize,reason="Existing utility actions keep their positions.",action=function() self:MoveLevelingPriority(spell.id,1) end},
-        {text=pins[id] and "Unpin position" or "Pin current position",disabled=not pins[id] and #positions==0,
-            reason="Pinned abilities keep their position while leveling. Place the ability on the bar to pin it.",
-            action=function() pins[id]=not pins[id] and positions[1] or nil; refresh() end},
         {text=excluded[id] and "Include in leveling again" or "Exclude from automatic layout",
             action=function() excluded[id]=not excluded[id] or nil; refresh() end},
     })
@@ -976,7 +960,7 @@ function MM:ShowAutoConsent()
     dialog.key,dialog.mode,dialog.sourceKey=self.current.key,settings.autoMode or "equivalence",settings.sourceKey
     dialog.translator=settings.translator
     dialog.description:SetText(self:IsLevelingMode()
-        and "I authorize MuscleMemory to rearrange this character’s abilities on login, level-up, learning abilities, changing talents, or switching specialization.\n\nAbilities may move to different keybindings based on bar priority. New abilities are placed automatically. Right-click to adjust priority or pin a position. Available mounts follow the exact source selection.\n\nChanges are made out of combat. Macros, items, and existing utility positions are preserved. Restore bars disables automation for every specialization and restores the state from the start of this authorization for the current specialization."
+        and "I authorize MuscleMemory to rearrange this character’s abilities on login, level-up, learning abilities, changing talents, or switching specialization.\n\nAbilities may move to different keybindings based on bar priority. New abilities are placed automatically. Right-click an ability to exclude it from the automatic layout. Available mounts follow the exact source selection.\n\nChanges are made out of combat. Macros, items, and existing utility positions are preserved. Restore bars disables automation for every specialization and restores the state from the start of this authorization for the current specialization."
         or "I authorize MuscleMemory to apply mappings from the selected source automatically for this character and specialization on login or ability/talent changes.\n\nButtons may be replaced with abilities available to the destination. Mounts preserve the exact source selection; actions without an available equivalent remain pending.\n\nChanges are made out of combat. Keybindings are not modified. Restore bars disables automation and restores the state from the start of this authorization.")
     dialog:Show()
 end

@@ -27,7 +27,7 @@ function MM:ProgressiveDamageScore(source,target,sourceSpec,targetSpec,sourceCla
     if x and y and (x>20 or y>20) then return end
     local ap,bp=source.purpose or {},target.purpose or {}
     if bp.condition and bp.condition~=ap.condition then return end
-    local score,reason=82,"Dano disponível; substituto temporário sem todas as funções da origem"
+    local score,reason=82,"Available damage; temporary stand-in without every role of the source"
     local tags={"generate_resource","spend_resource","prepare_proc","consume_proc"}
     local required,shared=0,0
     for _,tag in ipairs(tags) do
@@ -37,14 +37,14 @@ function MM:ProgressiveDamageScore(source,target,sourceSpec,targetSpec,sourceCla
         end
     end
     if required>0 and shared==required then
-        score,reason=96,"Mesma função de dano e recurso/proc, mesmo com outra mecânica de classe"
-    elseif shared>0 then score,reason=90,"Dano e parte da função de recurso/proc da origem"
-    elseif required==0 then score,reason=88,"Mesma função de dano; mecânica de recurso/proc pode diferir" end
+        score,reason=96,"Same damage and resource/proc role, even with a different class mechanic"
+    elseif shared>0 then score,reason=90,"Damage and part of the source's resource/proc role"
+    elseif required==0 then score,reason=88,"Same damage role; resource/proc mechanic may differ" end
     local ar,br=source.rotation or {},target.rotation or {}
     if ar.rhythm and ar.rhythm==br.rhythm then score=score+1 end
     if source.role==target.role then score=score+1 end
     if translator then reason="Translator melee ↔ caster: "..reason end
-    if required>shared then reason=reason.."; geração/gasto/proc ausente não é considerado equivalente" end
+    if required>shared then reason=reason.."; missing generation/spending/proc is not treated as equivalent" end
     return score,reason,true
 end
 
@@ -70,9 +70,11 @@ function MM:BuildCurrentPlan(reference,matches,known,actions)
         layout[change.slot]=change.after or {kind="spell",id=change.id}
         plannedSlots[change.slot]=true
     end
+    local excluded=settings.levelingExcluded or {}
     local function identity(spell) return spell.baseID or spell.id end
     local function eligible(spell)
         return spell and spell.learned and not spell.isPassive and not spell.offSpec
+            and not excluded[identity(spell)] and not excluded[spell.id]
             and not spell.action and spell.mountID==nil
             and not spell.isAssistant and self:IsActivePurpose(spell)
     end
@@ -171,8 +173,8 @@ function MM:BuildCurrentPlan(reference,matches,known,actions)
                 local after={kind="spell",id=spell.id}
                 if not self:ActionMatches(actions[slot],after) then
                     plan[#plan+1]={slot=slot,id=spell.id,after=after,before=actions[slot] or false,supplemental=true,
-                        placementReason=bestSlot and "Posição por função geral; não é equivalência direta"
-                            or "Posição complementar estável, próxima da função do main"}
+                        placementReason=bestSlot and "Placed by general role; not a direct equivalent"
+                            or "Stable complementary position, close to the main's role"}
                     plannedSlots[slot]=true
                 end
                 layout[slot],represented[id]=after,true
@@ -182,7 +184,9 @@ function MM:BuildCurrentPlan(reference,matches,known,actions)
         end
     end
     self.levelingUnplaced=missing
-    if automatic then
+    -- Only automatic leveling removes copies, matching the layout pruning
+    -- above; equivalence mode leaves copies the player placed on purpose.
+    if automatic and leveling then
         -- Place the destination first; cleanup comes last and shares the undo
         -- journal. A failed placement stops Apply before removing any copies.
         for slot=1,self.MAX_SLOT do
@@ -191,7 +195,7 @@ function MM:BuildCurrentPlan(reference,matches,known,actions)
             local id=spell and identity(spell)
             if self:IsManagedSlot(slot) and canonical[id] and not canonical[id][slot] and not plannedSlots[slot] then
                 plan[#plan+1]={slot=slot,before=self:Copy(action),after=false,clearing=true,
-                    placementReason="Cópia extra; habilidade mantida na posição da referência/complementar"}
+                    placementReason="Extra copy; ability kept at the reference/complementary position"}
             end
         end
     end

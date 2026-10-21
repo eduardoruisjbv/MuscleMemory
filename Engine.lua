@@ -13,7 +13,7 @@ end
 -- Suggest by habit of use. Protection scope, healing targets and control types
 -- remain constraints; rotation context ranks candidates instead of blocking them.
 function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
-    if source.isPassive or target.isPassive or target.offSpec then return 0,"Passiva ou habilidade de outra especialização" end
+    if source.isPassive or target.isPassive or target.offSpec then return 0,"Passive or off-spec ability" end
     if source.action or target.action then
         if source.action and target.action and source.id==target.id then
             return 100,"Exact copy of the utility action",false,{identity=true,rank=4}
@@ -31,7 +31,6 @@ function MM:Score(source,target,sourceSpec,targetSpec,sourceClass,targetClass)
     local sourceID,targetID=source.baseID or source.id,target.baseID or target.id
     -- Identical learned racials and common abilities do not need a class-specific
     -- guess. Preserve them first, including references captured by older versions.
-    if source.isPassive or target.isPassive or target.offSpec then return 0,"Passive or off-spec ability" end
     if source.id==target.id or sourceID==targetID then return 100,"Same ability available on the destination",false,{identity=true,rank=3} end
     if source.role == "unknown" or target.role == "unknown" then return 0,"Purpose not yet classified" end
     if not source.curated or not target.curated then return 35,"Estimated purpose; choose manually" end
