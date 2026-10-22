@@ -172,7 +172,9 @@ function MM:RefreshLearnedState()
     self.scanPending=nil
     local changed=false
     for _,spell in pairs(self.current.spells) do
-        local learned=isLearned(spell.id,spell.baseID,spell.offSpec)
+        -- Match Scan: a selected talent is learned even when the spellbook
+        -- does not report its ID; talent changes force a full rescan.
+        local learned=spell.talentSelected==true or isLearned(spell.id,spell.baseID,spell.offSpec)
         if spell.learned~=learned then
             spell.learned=learned
             spell.functions=nil
