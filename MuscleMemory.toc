@@ -2,6 +2,7 @@
 ## Title: MuscleMemory
 ## Notes: Keep abilities in the same action-bar slots across characters.
 ## Author: Eduardo Rui
+## X-Curse-Project-ID: 1725540
 ## Version: 0.8.0-beta.3
 ## SavedVariables: MuscleMemoryDB
 ## IconTexture: Interface\Icons\Spell_Nature_Strength
