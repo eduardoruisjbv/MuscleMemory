@@ -735,29 +735,51 @@ function MM:Apply(automatic)
     if not undo or not undo.automatic and not undo.clearPending then
         undo={key=self.current.key,changes={},created=time(),automatic=automatic}
     end
-    undo.clearPending=nil
     self.db.undo[self.current.key] = undo
     local applied = 0
     self.applying=true
     for _, change in ipairs(plan) do
-        local recorded
+        local recorded, journalEntry, previousJournal
         for _,old in ipairs(undo.changes) do
             if old.slot==change.slot then
+                journalEntry=old
+                previousJournal={after=old.after,id=old.id,clearing=old.clearing}
                 old.after,old.id,old.clearing=change.after,change.id,change.clearing
                 recorded=true; break
             end
         end
-        if not recorded then undo.changes[#undo.changes+1] = self:Copy(change) end
+        if not recorded then
+            journalEntry=self:Copy(change)
+            undo.changes[#undo.changes+1]=journalEntry
+        end
+        local beforeKind,beforeID=GetActionInfo(change.slot)
         local after=change.after or (not change.clearing and {kind="spell",id=change.id}) or nil
         local ok, success, reason = pcall(self.PutAction,self,change.slot,after)
         if not ok or not success then
             ClearCursor()
+            local currentKind,currentID,currentSubType=GetActionInfo(change.slot)
+            if currentKind==beforeKind and currentID==beforeID then
+                if recorded then
+                    journalEntry.after=previousJournal.after
+                    journalEntry.id=previousJournal.id
+                    journalEntry.clearing=previousJournal.clearing
+                end
+            elseif currentKind then
+                journalEntry.after={kind=currentKind,id=currentID,subType=currentSubType}
+                journalEntry.id=currentID
+                journalEntry.clearing=false
+            else
+                journalEntry.after=false
+                journalEntry.id=nil
+                journalEntry.clearing=true
+            end
             self:DisableAutomatic()
             self:Print("Application interrupted: "..tostring(ok and reason or success)..". Use /mm undo.")
             break
         end
         applied=applied+1
     end
+    if applied==#plan then undo.clearPending=nil end
     self.applying=nil
     if self:IsLevelingMode() and self.levelingUnplaced and #self.levelingUnplaced>0 then
         self:Print("Learned but not yet placed on the bars: "..table.concat(self.levelingUnplaced,", "))
